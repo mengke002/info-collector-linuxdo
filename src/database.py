@@ -22,6 +22,94 @@ class DatabaseManager:
         """获取当前北京时间"""
         return datetime.now(timezone.utc) + timedelta(hours=8)
     
+    def _sanitize_user_data(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
+        """清理和验证用户数据，确保符合数据库字段限制"""
+        sanitized = user_data.copy()
+        
+        # 截断字符串字段
+        if 'username' in sanitized and sanitized['username']:
+            original = str(sanitized['username'])
+            sanitized['username'] = original[:50]
+            if len(original) > 50:
+                self.logger.warning(f"用户名被截断: {original[:20]}... -> {sanitized['username']}")
+        
+        if 'avatar_url' in sanitized and sanitized['avatar_url']:
+            original = str(sanitized['avatar_url'])
+            sanitized['avatar_url'] = original[:200]
+            if len(original) > 200:
+                self.logger.warning(f"头像URL被截断: {original[:50]}...")
+        
+        return sanitized
+    
+    def _sanitize_topic_data(self, topic_data: Dict[str, Any]) -> Dict[str, Any]:
+        """清理和验证主题数据，确保符合数据库字段限制"""
+        sanitized = topic_data.copy()
+        
+        # 截断字符串字段
+        if 'title' in sanitized and sanitized['title']:
+            original = str(sanitized['title'])
+            sanitized['title'] = original[:500]
+            if len(original) > 500:
+                self.logger.warning(f"标题被截断: {original[:50]}...")
+        
+        if 'url' in sanitized and sanitized['url']:
+            original = str(sanitized['url'])
+            sanitized['url'] = original[:200]
+            if len(original) > 200:
+                self.logger.warning(f"URL被截断: {original}")
+        
+        if 'category' in sanitized and sanitized['category']:
+            original = str(sanitized['category'])
+            sanitized['category'] = original[:50]
+            if len(original) > 50:
+                self.logger.warning(f"分类名被截断: {original}")
+        
+        if 'tags' in sanitized and sanitized['tags']:
+            original = str(sanitized['tags'])
+            sanitized['tags'] = original[:500]
+            if len(original) > 500:
+                self.logger.warning(f"标签被截断: {original[:50]}...")
+        
+        # 限制数值字段范围
+        if 'reply_count' in sanitized:
+            original_count = int(sanitized['reply_count'] or 0)
+            sanitized['reply_count'] = min(max(original_count, 0), 65535)
+            if original_count > 65535:
+                self.logger.warning(f"回复数超出范围被限制: {original_count} -> 65535")
+        
+        if 'view_count' in sanitized:
+            original_count = int(sanitized['view_count'] or 0)
+            sanitized['view_count'] = min(max(original_count, 0), 4294967295)
+            if original_count > 4294967295:
+                self.logger.warning(f"浏览数超出范围被限制: {original_count} -> 4294967295")
+        
+        return sanitized
+    
+    def _sanitize_post_data(self, post_data: Dict[str, Any]) -> Dict[str, Any]:
+        """清理和验证帖子数据，确保符合数据库字段限制"""
+        sanitized = post_data.copy()
+        
+        # 限制数值字段范围
+        if 'post_number' in sanitized:
+            original_num = int(sanitized['post_number'] or 1)
+            sanitized['post_number'] = min(max(original_num, 1), 65535)
+            if original_num > 65535:
+                self.logger.warning(f"楼层号超出范围被限制: {original_num} -> 65535")
+        
+        if 'reply_to_post_number' in sanitized and sanitized['reply_to_post_number']:
+            original_num = int(sanitized['reply_to_post_number'])
+            sanitized['reply_to_post_number'] = min(max(original_num, 1), 65535)
+            if original_num > 65535:
+                self.logger.warning(f"回复楼层号超出范围被限制: {original_num} -> 65535")
+        
+        if 'like_count' in sanitized:
+            original_count = int(sanitized['like_count'] or 0)
+            sanitized['like_count'] = min(max(original_count, 0), 255)
+            if original_count > 255:
+                self.logger.warning(f"点赞数超出范围被限制: {original_count} -> 255")
+        
+        return sanitized
+    
     def get_connection(self):
         """获取数据库连接"""
         try:
@@ -79,26 +167,28 @@ class DatabaseManager:
             """
             CREATE TABLE IF NOT EXISTS users (
                 id INT PRIMARY KEY COMMENT '用户在论坛的唯一ID',
-                username VARCHAR(255) UNIQUE NOT NULL COMMENT '用户名',
-                avatar_url VARCHAR(512) COMMENT '头像URL',
-                first_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '首次采集到该用户的时间（UTC）'
+                username VARCHAR(50) UNIQUE NOT NULL COMMENT '用户名',
+                avatar_url VARCHAR(200) COMMENT '头像URL',
+                first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '首次采集到该用户的时间'
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
             """,
             """
             CREATE TABLE IF NOT EXISTS topics (
                 id INT PRIMARY KEY COMMENT '帖子在论坛的唯一ID',
-                title TEXT NOT NULL COMMENT '帖子标题',
-                url VARCHAR(512) UNIQUE NOT NULL COMMENT '帖子URL',
-                category VARCHAR(255) COMMENT '分类名称',
+                title VARCHAR(500) NOT NULL COMMENT '帖子标题',
+                url VARCHAR(200) UNIQUE NOT NULL COMMENT '帖子URL',
+                category VARCHAR(50) COMMENT '分类名称',
                 author_id INT COMMENT '作者用户ID',
-                reply_count INT DEFAULT 0 COMMENT '回复数',
-                view_count INT DEFAULT 0 COMMENT '浏览数',
-                created_at DATETIME NOT NULL COMMENT '帖子创建时间',
-                last_activity_at DATETIME NOT NULL COMMENT '最后活跃时间',
-                tags TEXT COMMENT '标签，逗号分隔',
-                crawled_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录首次抓取和更新的时间（UTC）',
+                reply_count SMALLINT UNSIGNED DEFAULT 0 COMMENT '回复数',
+                view_count INT UNSIGNED DEFAULT 0 COMMENT '浏览数',
+                created_at TIMESTAMP NOT NULL COMMENT '帖子创建时间',
+                last_activity_at TIMESTAMP NOT NULL COMMENT '最后活跃时间',
+                tags VARCHAR(500) COMMENT '标签，逗号分隔',
+                crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录首次抓取和更新的时间',
                 
                 INDEX idx_last_activity (last_activity_at),
+                INDEX idx_created_at (created_at),
+                INDEX idx_reply_count (reply_count),
                 FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
             """,
@@ -107,14 +197,15 @@ class DatabaseManager:
                 id INT PRIMARY KEY COMMENT '回复在论坛的唯一ID',
                 topic_id INT NOT NULL COMMENT '所属帖子的ID',
                 user_id INT COMMENT '回复用户的ID',
-                post_number INT NOT NULL COMMENT '楼层号',
-                reply_to_post_number INT COMMENT '回复目标的楼层号，主楼则为NULL',
+                post_number SMALLINT UNSIGNED NOT NULL COMMENT '楼层号',
+                reply_to_post_number SMALLINT UNSIGNED COMMENT '回复目标的楼层号，主楼则为NULL',
                 content_raw MEDIUMTEXT COMMENT '原始文本内容（Markdown等），对AI至关重要',
-                like_count SMALLINT UNSIGNED DEFAULT 0 COMMENT '点赞数',
-                created_at DATETIME NOT NULL COMMENT '本条回复的创建时间',
+                like_count TINYINT UNSIGNED DEFAULT 0 COMMENT '点赞数',
+                created_at TIMESTAMP NOT NULL COMMENT '本条回复的创建时间',
                 
                 UNIQUE KEY uk_topic_post (topic_id, post_number),
                 INDEX idx_user (user_id),
+                INDEX idx_created_at (created_at),
                 
                 FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -130,9 +221,12 @@ class DatabaseManager:
     
     def insert_or_update_user(self, user_data: Dict[str, Any]):
         """插入或忽略用户数据"""
+        # 清理数据
+        sanitized_data = self._sanitize_user_data(user_data)
+        
         # 如果没有提供首次看到时间，使用当前北京时间
-        if 'first_seen_at' not in user_data:
-            user_data['first_seen_at'] = self.get_beijing_time()
+        if 'first_seen_at' not in sanitized_data:
+            sanitized_data['first_seen_at'] = self.get_beijing_time()
         
         sql = """
         INSERT IGNORE INTO users (id, username, avatar_url, first_seen_at)
@@ -140,20 +234,23 @@ class DatabaseManager:
         """
         
         with self.get_cursor() as (cursor, connection):
-            cursor.execute(sql, user_data)
+            cursor.execute(sql, sanitized_data)
             connection.commit()
     
     def insert_or_update_topic(self, topic_data: Dict[str, Any]):
         """插入或更新主题数据"""
+        # 清理数据
+        sanitized_data = self._sanitize_topic_data(topic_data)
+        
         with self.get_cursor() as (cursor, connection):
             # 如果有作者信息，先插入用户
-            if topic_data.get('author_id') and topic_data.get('author_username'):
-                user_data = {
-                    'id': topic_data['author_id'],
-                    'username': topic_data['author_username'],
+            if sanitized_data.get('author_id') and sanitized_data.get('author_username'):
+                user_data = self._sanitize_user_data({
+                    'id': sanitized_data['author_id'],
+                    'username': sanitized_data['author_username'],
                     'avatar_url': None,
                     'first_seen_at': self.get_beijing_time()
-                }
+                })
                 user_sql = """
                 INSERT IGNORE INTO users (id, username, avatar_url, first_seen_at)
                 VALUES (%(id)s, %(username)s, %(avatar_url)s, %(first_seen_at)s)
@@ -177,14 +274,17 @@ class DatabaseManager:
             """
             
             # 如果没有提供抓取时间，使用当前北京时间
-            if 'crawled_at' not in topic_data:
-                topic_data['crawled_at'] = self.get_beijing_time()
+            if 'crawled_at' not in sanitized_data:
+                sanitized_data['crawled_at'] = self.get_beijing_time()
             
-            cursor.execute(topic_sql, topic_data)
+            cursor.execute(topic_sql, sanitized_data)
             connection.commit()
     
     def insert_or_update_post(self, post_data: Dict[str, Any]):
         """插入或更新帖子回复数据"""
+        # 清理数据
+        sanitized_data = self._sanitize_post_data(post_data)
+        
         sql = """
         INSERT INTO posts (id, topic_id, user_id, post_number, reply_to_post_number,
                           content_raw, like_count, created_at)
@@ -196,7 +296,7 @@ class DatabaseManager:
         """
         
         with self.get_cursor() as (cursor, connection):
-            cursor.execute(sql, post_data)
+            cursor.execute(sql, sanitized_data)
             connection.commit()
     
     def batch_insert_users(self, users_data: List[Dict[str, Any]]):
@@ -204,11 +304,15 @@ class DatabaseManager:
         if not users_data:
             return
         
-        # 为没有first_seen_at的用户数据添加北京时间
+        # 清理和验证所有用户数据
         beijing_time = self.get_beijing_time()
+        sanitized_users = []
+        
         for user_data in users_data:
-            if 'first_seen_at' not in user_data:
-                user_data['first_seen_at'] = beijing_time
+            sanitized = self._sanitize_user_data(user_data)
+            if 'first_seen_at' not in sanitized:
+                sanitized['first_seen_at'] = beijing_time
+            sanitized_users.append(sanitized)
         
         sql = """
         INSERT IGNORE INTO users (id, username, avatar_url, first_seen_at)
@@ -216,14 +320,20 @@ class DatabaseManager:
         """
         
         with self.get_cursor() as (cursor, connection):
-            cursor.executemany(sql, users_data)
+            cursor.executemany(sql, sanitized_users)
             connection.commit()
-            self.logger.info(f"批量插入 {len(users_data)} 个用户")
+            self.logger.info(f"批量插入 {len(sanitized_users)} 个用户")
     
     def batch_insert_posts(self, posts_data: List[Dict[str, Any]]):
         """批量插入帖子回复数据"""
         if not posts_data:
             return
+        
+        # 清理和验证所有帖子数据
+        sanitized_posts = []
+        for post_data in posts_data:
+            sanitized = self._sanitize_post_data(post_data)
+            sanitized_posts.append(sanitized)
         
         sql = """
         INSERT INTO posts (id, topic_id, user_id, post_number, reply_to_post_number,
@@ -236,9 +346,9 @@ class DatabaseManager:
         """
         
         with self.get_cursor() as (cursor, connection):
-            cursor.executemany(sql, posts_data)
+            cursor.executemany(sql, sanitized_posts)
             connection.commit()
-            self.logger.info(f"批量插入 {len(posts_data)} 个回复")
+            self.logger.info(f"批量插入 {len(sanitized_posts)} 个回复")
     
     def get_topic_last_activity(self, topic_id: int) -> Optional[datetime]:
         """获取主题的最后活跃时间"""
@@ -270,11 +380,15 @@ class DatabaseManager:
         if not topics_data:
             return
         
-        # 为没有crawled_at的主题数据添加北京时间
+        # 清理和验证所有主题数据
         beijing_time = self.get_beijing_time()
+        sanitized_topics = []
+        
         for topic_data in topics_data:
-            if 'crawled_at' not in topic_data:
-                topic_data['crawled_at'] = beijing_time
+            sanitized = self._sanitize_topic_data(topic_data)
+            if 'crawled_at' not in sanitized:
+                sanitized['crawled_at'] = beijing_time
+            sanitized_topics.append(sanitized)
         
         sql = """
         INSERT INTO topics (
@@ -296,9 +410,9 @@ class DatabaseManager:
         """
         
         with self.get_cursor() as (cursor, connection):
-            cursor.executemany(sql, topics_data)
+            cursor.executemany(sql, sanitized_topics)
             connection.commit()
-            self.logger.info(f"批量插入/更新 {len(topics_data)} 个主题")
+            self.logger.info(f"批量插入/更新 {len(sanitized_topics)} 个主题")
     
     def clean_old_data(self, retention_days: int) -> int:
         """清理过期数据"""
