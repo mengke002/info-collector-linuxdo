@@ -89,6 +89,17 @@ class DatabaseManager:
         """清理和验证帖子数据，确保符合数据库字段限制"""
         sanitized = post_data.copy()
         
+        # 限制内容长度 (TEXT字段最大65535字节，utf8mb4每字符最多4字节)
+        if 'content_raw' in sanitized and sanitized['content_raw']:
+            original_content = str(sanitized['content_raw'])
+            # 保守估计，限制为16000字符，确保不超过64KB
+            max_chars = 16000
+            if len(original_content) > max_chars:
+                sanitized['content_raw'] = original_content[:max_chars] + "...[内容被截断]"
+                self.logger.warning(f"帖子内容过长被截断: {len(original_content)} -> {max_chars} 字符")
+            else:
+                sanitized['content_raw'] = original_content
+        
         # 限制数值字段范围
         if 'post_number' in sanitized:
             original_num = int(sanitized['post_number'] or 1)
@@ -170,7 +181,7 @@ class DatabaseManager:
                 username VARCHAR(50) UNIQUE NOT NULL COMMENT '用户名',
                 avatar_url VARCHAR(200) COMMENT '头像URL',
                 first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '首次采集到该用户的时间'
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=COMPRESSED;
             """,
             """
             CREATE TABLE IF NOT EXISTS topics (
@@ -190,7 +201,7 @@ class DatabaseManager:
                 INDEX idx_created_at (created_at),
                 INDEX idx_reply_count (reply_count),
                 FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE SET NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=COMPRESSED;
             """,
             """
             CREATE TABLE IF NOT EXISTS posts (
@@ -199,7 +210,7 @@ class DatabaseManager:
                 user_id INT COMMENT '回复用户的ID',
                 post_number SMALLINT UNSIGNED NOT NULL COMMENT '楼层号',
                 reply_to_post_number SMALLINT UNSIGNED COMMENT '回复目标的楼层号，主楼则为NULL',
-                content_raw MEDIUMTEXT COMMENT '原始文本内容（Markdown等），对AI至关重要',
+                content_raw TEXT COMMENT '原始文本内容（Markdown等），最大64KB',
                 like_count TINYINT UNSIGNED DEFAULT 0 COMMENT '点赞数',
                 created_at TIMESTAMP NOT NULL COMMENT '本条回复的创建时间',
                 
@@ -209,7 +220,7 @@ class DatabaseManager:
                 
                 FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=COMPRESSED;
             """
         ]
         
