@@ -1,0 +1,205 @@
+name: Linux.do info collector
+
+on:
+  schedule:
+    # 每30分钟运行一次爬取任务
+    - cron: '*/30 * * * *'
+    # 每2天凌晨2点运行清理任务
+    - cron: '0 2 */2 * *'
+  workflow_dispatch:
+    inputs:
+      task:
+        description: '任务类型'
+        required: true
+        default: 'crawl'
+        type: choice
+        options:
+        - crawl
+        - cleanup
+        - stats
+        - full
+      retention_days:
+        description: '数据保留天数（仅用于cleanup任务）'
+        required: false
+        default: '120'
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '*/30 * * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'crawl')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Install Playwright browsers
+      run: playwright install --with-deps chromium
+        
+    - name: Run crawler
+      run: python main.py --task crawl --output json
+      env:
+        # --- Required Secrets ---
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_USER: ${{ secrets.DB_USER }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        DB_NAME: ${{ secrets.DB_NAME }}
+        DB_PORT: ${{ secrets.DB_PORT }}
+        DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+        TARGETS: ${{ secrets.TARGETS }}
+
+        # --- Optional Secrets (with defaults in code) ---
+        CRAWLER_SCAN_PAGES: ${{ secrets.CRAWLER_SCAN_PAGES }}
+        CRAWLER_DELAY_SECONDS: ${{ secrets.CRAWLER_DELAY_SECONDS }}
+        CRAWLER_MAX_RETRIES: ${{ secrets.CRAWLER_MAX_RETRIES }}
+        CRAWLER_TIMEOUT_SECONDS: ${{ secrets.CRAWLER_TIMEOUT_SECONDS }}
+        CRAWLER_MAX_CONCURRENT_BOARDS: ${{ secrets.CRAWLER_MAX_CONCURRENT_BOARDS }}
+        CRAWLER_MAX_CONCURRENT_PAGES: ${{ secrets.CRAWLER_MAX_CONCURRENT_PAGES }}
+        CRAWLER_MAX_CONCURRENT_DETAILS: ${{ secrets.CRAWLER_MAX_CONCURRENT_DETAILS }}
+        DATA_RETENTION_DAYS: ${{ secrets.DATA_RETENTION_DAYS }}
+        LOGGING_LOG_LEVEL: ${{ secrets.LOGGING_LOG_LEVEL }}
+        LOGGING_LOG_FILE: ${{ secrets.LOGGING_LOG_FILE }}
+      
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 2 */2 * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'cleanup')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Install Playwright browsers
+      run: playwright install --with-deps chromium
+        
+    - name: Run cleanup
+      run: python main.py --task cleanup --retention-days ${{ github.event.inputs.retention_days || 180 }} --output json
+      env:
+        # --- Required Secrets ---
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_USER: ${{ secrets.DB_USER }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        DB_NAME: ${{ secrets.DB_NAME }}
+        DB_PORT: ${{ secrets.DB_PORT }}
+        DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+        TARGETS: ${{ secrets.TARGETS }}
+
+        # --- Optional Secrets (with defaults in code) ---
+        CRAWLER_SCAN_PAGES: ${{ secrets.CRAWLER_SCAN_PAGES }}
+        CRAWLER_DELAY_SECONDS: ${{ secrets.CRAWLER_DELAY_SECONDS }}
+        CRAWLER_MAX_RETRIES: ${{ secrets.CRAWLER_MAX_RETRIES }}
+        CRAWLER_TIMEOUT_SECONDS: ${{ secrets.CRAWLER_TIMEOUT_SECONDS }}
+        CRAWLER_MAX_CONCURRENT_BOARDS: ${{ secrets.CRAWLER_MAX_CONCURRENT_BOARDS }}
+        CRAWLER_MAX_CONCURRENT_PAGES: ${{ secrets.CRAWLER_MAX_CONCURRENT_PAGES }}
+        CRAWLER_MAX_CONCURRENT_DETAILS: ${{ secrets.CRAWLER_MAX_CONCURRENT_DETAILS }}
+        DATA_RETENTION_DAYS: ${{ secrets.DATA_RETENTION_DAYS }}
+        LOGGING_LOG_LEVEL: ${{ secrets.LOGGING_LOG_LEVEL }}
+        LOGGING_LOG_FILE: ${{ secrets.LOGGING_LOG_FILE }}
+      
+  stats:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'stats'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Install Playwright browsers
+      run: playwright install --with-deps chromium
+        
+    - name: Get stats
+      run: python main.py --task stats --output json
+      env:
+        # --- Required Secrets ---
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_USER: ${{ secrets.DB_USER }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        DB_NAME: ${{ secrets.DB_NAME }}
+        DB_PORT: ${{ secrets.DB_PORT }}
+        DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+        TARGETS: ${{ secrets.TARGETS }}
+
+        # --- Optional Secrets (with defaults in code) ---
+        CRAWLER_SCAN_PAGES: ${{ secrets.CRAWLER_SCAN_PAGES }}
+        CRAWLER_DELAY_SECONDS: ${{ secrets.CRAWLER_DELAY_SECONDS }}
+        CRAWLER_MAX_RETRIES: ${{ secrets.CRAWLER_MAX_RETRIES }}
+        CRAWLER_TIMEOUT_SECONDS: ${{ secrets.CRAWLER_TIMEOUT_SECONDS }}
+        CRAWLER_MAX_CONCURRENT_BOARDS: ${{ secrets.CRAWLER_MAX_CONCURRENT_BOARDS }}
+        CRAWLER_MAX_CONCURRENT_PAGES: ${{ secrets.CRAWLER_MAX_CONCURRENT_PAGES }}
+        CRAWLER_MAX_CONCURRENT_DETAILS: ${{ secrets.CRAWLER_MAX_CONCURRENT_DETAILS }}
+        DATA_RETENTION_DAYS: ${{ secrets.DATA_RETENTION_DAYS }}
+        LOGGING_LOG_LEVEL: ${{ secrets.LOGGING_LOG_LEVEL }}
+        LOGGING_LOG_FILE: ${{ secrets.LOGGING_LOG_FILE }}
+      
+  full:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'full'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Install Playwright browsers
+      run: playwright install --with-deps chromium
+        
+    - name: Run full maintenance
+      run: python main.py --task full --output json
+      env:
+        # --- Required Secrets ---
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_USER: ${{ secrets.DB_USER }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        DB_NAME: ${{ secrets.DB_NAME }}
+        TARGETS: ${{ secrets.TARGETS }}
+        DB_PORT: ${{ secrets.DB_PORT }}
+        DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
+
+        # --- Optional Secrets (with defaults in code) ---
+        CRAWLER_SCAN_PAGES: ${{ secrets.CRAWLER_SCAN_PAGES }}
+        CRAWLER_DELAY_SECONDS: ${{ secrets.CRAWLER_DELAY_SECONDS }}
+        CRAWLER_MAX_RETRIES: ${{ secrets.CRAWLER_MAX_RETRIES }}
+        CRAWLER_TIMEOUT_SECONDS: ${{ secrets.CRAWLER_TIMEOUT_SECONDS }}
+        CRAWLER_MAX_CONCURRENT_BOARDS: ${{ secrets.CRAWLER_MAX_CONCURRENT_BOARDS }}
+        CRAWLER_MAX_CONCURRENT_PAGES: ${{ secrets.CRAWLER_MAX_CONCURRENT_PAGES }}
+        CRAWLER_MAX_CONCURRENT_DETAILS: ${{ secrets.CRAWLER_MAX_CONCURRENT_DETAILS }}
+        DATA_RETENTION_DAYS: ${{ secrets.DATA_RETENTION_DAYS }}
+        LOGGING_LOG_LEVEL: ${{ secrets.LOGGING_LOG_LEVEL }}
+        LOGGING_LOG_FILE: ${{ secrets.LOGGING_LOG_FILE }}
