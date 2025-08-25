@@ -21,6 +21,7 @@ class HotnessAnalyzer:
         self.reply_weight = 5.0     # 回复数权重  
         self.like_weight = 3.0      # 点赞数权重
         self.time_decay_hours = 168  # 时间衰减周期：7天
+        self.max_hotness_score = 999999.0  # 热度分数最大值限制
     
     def get_beijing_time(self) -> datetime:
         """获取当前北京时间"""
@@ -74,10 +75,11 @@ class HotnessAnalyzer:
                 view_weight=vw,
                 reply_weight=rw,
                 like_weight=lw,
-                time_decay_hours=tdh
+                time_decay_hours=tdh,
+                max_score=self.max_hotness_score  # 传递最大分数限制
             )
             
-            self.logger.info(f"成功更新 {updated_count} 个主题的热度分数")
+            self.logger.info(f"成功更新 {updated_count} 个主题的热度分数（最大值限制: {self.max_hotness_score}）")
             return updated_count
         except Exception as e:
             self.logger.error(f"更新热度分数失败: {e}")

@@ -535,25 +535,27 @@ class DatabaseManager:
                             view_weight: float = 1.0, 
                             reply_weight: float = 5.0, 
                             like_weight: float = 3.0,
-                            time_decay_hours: int = 168) -> int:  # 168小时 = 7天
+                            time_decay_hours: int = 168,
+                            max_score: float = 999999.0) -> int:  # 168小时 = 7天
         """
-        更新主题的热度分数
+        更新主题的热度分数（带数值范围控制和标准化）
         
         热度计算公式: (view_count * view_weight + reply_count * reply_weight + total_like_count * like_weight) 
                     * time_decay_factor
         
         时间衰减因子: max(0.1, 1 - (当前时间 - 最后活跃时间) / time_decay_hours)
+        数值范围控制: 结果被限制在 [0.1, max_score] 范围内
         """
         if topic_ids is None:
             # 更新所有主题
             sql = f"""
             UPDATE topics 
-            SET hotness_score = GREATEST(0.1,
+            SET hotness_score = LEAST(%s, GREATEST(0.1,
                 (view_count * %s + reply_count * %s + total_like_count * %s) *
                 GREATEST(0.1, 1 - TIMESTAMPDIFF(HOUR, last_activity_at, NOW()) / %s)
-            )
+            ))
             """
-            params = (view_weight, reply_weight, like_weight, time_decay_hours)
+            params = (max_score, view_weight, reply_weight, like_weight, time_decay_hours)
         else:
             # 更新指定主题
             if not topic_ids:
@@ -561,19 +563,19 @@ class DatabaseManager:
             placeholders = ','.join(['%s'] * len(topic_ids))
             sql = f"""
             UPDATE topics 
-            SET hotness_score = GREATEST(0.1,
+            SET hotness_score = LEAST(%s, GREATEST(0.1,
                 (view_count * %s + reply_count * %s + total_like_count * %s) *
                 GREATEST(0.1, 1 - TIMESTAMPDIFF(HOUR, last_activity_at, NOW()) / %s)
-            )
+            ))
             WHERE id IN ({placeholders})
             """
-            params = (view_weight, reply_weight, like_weight, time_decay_hours) + tuple(topic_ids)
+            params = (max_score, view_weight, reply_weight, like_weight, time_decay_hours) + tuple(topic_ids)
         
         with self.get_cursor() as (cursor, connection):
             cursor.execute(sql, params)
             updated_count = cursor.rowcount
             connection.commit()
-            self.logger.info(f"更新了 {updated_count} 个主题的热度分数")
+            self.logger.info(f"更新了 {updated_count} 个主题的热度分数（最大值限制: {max_score}）")
             return updated_count
     
     def get_hot_topics_by_category(self, category: str, limit: int = 30, 
