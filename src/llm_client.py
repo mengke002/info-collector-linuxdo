@@ -93,7 +93,7 @@ class LLMClient:
                 self.logger.info(f"推理内容长度: {len(reasoning_content_full)} 字符")
                 self.logger.debug(f"推理内容预览: {reasoning_content_full[:200]}...")
             self.logger.info(f"最终内容长度: {len(full_content)} 字符")
-            self.logger.debug(f"最终内容预览: {full_content[:300]}...")
+            self.logger.info(f"最终内容预览: {full_content[:300]}...")
             self.logger.debug("=== LLM 最终内容 ===")
             self.logger.debug(full_content)
             self.logger.debug("=== LLM 响应结束 ===")
