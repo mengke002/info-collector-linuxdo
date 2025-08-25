@@ -8,7 +8,6 @@ from typing import Dict, Any
 
 from .logger import setup_logging, log_task_start, log_task_end, log_error
 from .database import db_manager
-from .concurrent_crawler import ConcurrentCrawler
 from .data_cleaner import data_cleaner
 from .analyzer import hotness_analyzer
 from .report_generator import report_generator
@@ -29,6 +28,17 @@ class TaskScheduler:
         start_time = log_task_start(task_name)
         
         try:
+            # 延迟导入ConcurrentCrawler，避免非爬虫任务因playwright缺失而失败
+            try:
+                from .concurrent_crawler import ConcurrentCrawler
+            except ImportError as e:
+                error_msg = f"无法导入爬虫模块：{e}。请确保已安装playwright: pip install playwright && playwright install"
+                self.logger.error(error_msg)
+                return {
+                    'success': False,
+                    'error': error_msg
+                }
+            
             # 初始化数据库
             self.logger.info("初始化数据库...")
             db_manager.init_database()

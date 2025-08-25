@@ -41,10 +41,14 @@ jobs:
       with:
         python-version: '3.12'
         
-    - name: Install dependencies
+    - name: Install base dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install -r requirements-base.txt
+        
+    - name: Install crawler dependencies
+      run: |
+        pip install -r requirements-crawler.txt
         
     - name: Install Playwright browsers
       run: playwright install --with-deps chromium
@@ -86,13 +90,10 @@ jobs:
       with:
         python-version: '3.12'
         
-    - name: Install dependencies
+    - name: Install base dependencies only
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: Install Playwright browsers
-      run: playwright install --with-deps chromium
+        pip install -r requirements-base.txt
         
     - name: Run cleanup
       run: python main.py --task cleanup --retention-days ${{ github.event.inputs.retention_days || 180 }} --output json
@@ -131,13 +132,10 @@ jobs:
       with:
         python-version: '3.12'
         
-    - name: Install dependencies
+    - name: Install base dependencies only
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: Install Playwright browsers
-      run: playwright install --with-deps chromium
+        pip install -r requirements-base.txt
         
     - name: Get stats
       run: python main.py --task stats --output json
@@ -176,13 +174,10 @@ jobs:
       with:
         python-version: '3.12'
         
-    - name: Install dependencies
+    - name: Install base dependencies only
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: Install Playwright browsers
-      run: playwright install --with-deps chromium
+        pip install -r requirements-base.txt
         
     - name: Run hotness analysis
       run: python main.py --task analysis --output json
@@ -221,10 +216,14 @@ jobs:
       with:
         python-version: '3.12'
         
-    - name: Install dependencies
+    - name: Install base dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install -r requirements-base.txt
+        
+    - name: Install crawler dependencies
+      run: |
+        pip install -r requirements-crawler.txt
         
     - name: Install Playwright browsers
       run: playwright install --with-deps chromium
@@ -266,13 +265,10 @@ jobs:
       with:
         python-version: '3.12'
         
-    - name: Install dependencies
+    - name: Install base dependencies only
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: Install Playwright browsers
-      run: playwright install --with-deps chromium
+        pip install -r requirements-base.txt
         
     - name: Run intelligent analysis report
       run: python main.py --task report --output json
