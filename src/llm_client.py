@@ -41,12 +41,13 @@ class LLMClient:
             # 格式化提示词
             prompt = prompt_template.format(content=content)
             
-            # 调试输出：显示请求信息
-            self.logger.info("=== LLM 请求调试信息 ===")
-            self.logger.info(f"模型: {self.model}")
+            # 调试输出：显示请求信息（仅在DEBUG级别显示详细内容）
+            self.logger.info("开始LLM内容分析...")
+            self.logger.debug("=== LLM 请求调试信息 ===")
+            self.logger.debug(f"模型: {self.model}")
             self.logger.info(f"内容长度: {len(content)} 字符")
-            self.logger.info(f"提示词长度: {len(prompt)} 字符")
-            self.logger.info(f"内容预览: {content[:200]}...")
+            self.logger.debug(f"提示词长度: {len(prompt)} 字符")
+            self.logger.debug(f"内容预览: {content[:200]}...")
             
             # 创建streaming请求
             response = self.client.chat.completions.create(
@@ -84,17 +85,18 @@ class LLMClient:
                     full_content += content_chunk
                     self.logger.debug(f"Chunk {chunk_count} - Content: {content_chunk[:50]}...")
             
-            # 调试输出：显示响应结果
-            self.logger.info("=== LLM 响应调试信息 ===")
+            # 调试输出：显示响应结果（敏感信息仅在DEBUG级别显示）
+            self.logger.info("LLM分析完成")
+            self.logger.debug("=== LLM 响应调试信息 ===")
             self.logger.info(f"处理了 {chunk_count} 个 chunks")
             if reasoning_content_full:
                 self.logger.info(f"推理内容长度: {len(reasoning_content_full)} 字符")
-                self.logger.info(f"推理内容预览: {reasoning_content_full[:200]}...")
+                self.logger.debug(f"推理内容预览: {reasoning_content_full[:200]}...")
             self.logger.info(f"最终内容长度: {len(full_content)} 字符")
-            self.logger.info(f"最终内容预览: {full_content[:300]}...")
-            self.logger.info("=== LLM 最终内容 ===")
-            self.logger.info(full_content)
-            self.logger.info("=== LLM 响应结束 ===")
+            self.logger.debug(f"最终内容预览: {full_content[:300]}...")
+            self.logger.debug("=== LLM 最终内容 ===")
+            self.logger.debug(full_content)
+            self.logger.debug("=== LLM 响应结束 ===")
             
             return {
                 'success': True,
