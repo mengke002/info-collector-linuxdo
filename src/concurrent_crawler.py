@@ -52,7 +52,7 @@ class ConcurrentCrawler:
         beijing_time = utc_time + timedelta(hours=8)
         return beijing_time.replace(tzinfo=None)
 
-    def _is_meaningful_post(self, content: str, min_length: int = 5) -> bool:
+    def _is_meaningful_post(self, content: str, min_length: int = 15) -> bool:
         """
         判断一个帖子内容是否有意义
         - 检查长度
