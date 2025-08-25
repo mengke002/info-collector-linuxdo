@@ -21,7 +21,7 @@ def get_beijing_time():
 async def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='Linux.do论坛自动化数据运维系统')
-    parser.add_argument('--task', choices=['crawl', 'cleanup', 'stats', 'full'], 
+    parser.add_argument('--task', choices=['crawl', 'cleanup', 'stats', 'analysis', 'report', 'full'], 
                        default='crawl', help='要执行的任务类型')
     parser.add_argument('--retention-days', type=int, 
                        help='数据保留天数（仅用于cleanup任务）')
@@ -31,6 +31,12 @@ async def main():
                        help='使用并发模式（默认启用）')
     parser.add_argument('--serial', action='store_true',
                        help='使用串行模式（覆盖--concurrent）')
+    parser.add_argument('--hours-back', type=int, default=24,
+                       help='分析任务回溯的小时数（默认24小时）')
+    parser.add_argument('--analyze-all', action='store_true',
+                       help='分析所有主题（仅用于analysis任务）')
+    parser.add_argument('--category', type=str,
+                       help='指定板块分类（仅用于report任务）')
     
     args = parser.parse_args()
     
@@ -49,6 +55,10 @@ async def main():
         result = scheduler.run_cleanup_task(args.retention_days)
     elif args.task == 'stats':
         result = scheduler.run_stats_task()
+    elif args.task == 'analysis':
+        result = scheduler.run_analysis_task(args.hours_back, args.analyze_all)
+    elif args.task == 'report':
+        result = await scheduler.run_report_task(args.category, args.hours_back)
     elif args.task == 'full':
         result = await scheduler.run_full_maintenance()
     else:
@@ -107,6 +117,33 @@ def print_result(result: dict, task_type: str):
             print(f"   最新活动: {stats['latest_activity']}")
         if stats.get('oldest_activity'):
             print(f"   最旧数据: {stats['oldest_activity']}")
+    
+    elif task_type == 'analysis':
+        print(f"✅ 热度分析完成")
+        print(f"   分析主题: {result.get('analyzed_topics', result.get('updated_scores', 0))} 个")
+        print(f"   更新点赞: {result.get('updated_likes', 0)} 个")
+        print(f"   更新热度: {result.get('updated_scores', 0)} 个")
+        
+        stats_result = result.get('hotness_stats', {})
+        if stats_result.get('success'):
+            stats = stats_result
+            print(f"   平均热度: {stats.get('avg_hotness', 0)}")
+            print(f"   最高热度: {stats.get('max_hotness', 0)}")
+    
+    elif task_type == 'report':
+        print(f"✅ 智能分析报告完成")
+        if 'category' in result:
+            # 单个板块报告
+            print(f"   板块: {result.get('category')}")
+            print(f"   分析主题: {result.get('topics_analyzed', 0)} 个")
+            if result.get('report_id'):
+                print(f"   报告ID: {result.get('report_id')}")
+        else:
+            # 所有板块报告
+            print(f"   成功板块: {result.get('successful_reports', 0)}/{result.get('total_categories', 0)}")
+            print(f"   总分析主题: {result.get('total_topics_analyzed', 0)} 个")
+            if result.get('failures'):
+                print(f"   失败板块: {len(result['failures'])} 个")
     
     elif task_type == 'full':
         results = result.get('results', {})

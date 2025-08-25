@@ -161,6 +161,26 @@ class Config:
             pass
         
         return targets
+    
+    def get_llm_config(self) -> Dict[str, Any]:
+        """获取LLM配置，优先级：环境变量 > config.ini > 默认值。"""
+        return {
+            # OpenAI 配置
+            'openai_api_key': self._get_config_value('llm', 'openai_api_key', 'OPENAI_API_KEY', None),
+            'openai_model': self._get_config_value('llm', 'openai_model', 'OPENAI_MODEL', 'gpt-3.5-turbo'),
+            'openai_base_url': self._get_config_value('llm', 'openai_base_url', 'OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+            
+            # DeepSeek 配置
+            'deepseek_api_key': self._get_config_value('llm', 'deepseek_api_key', 'DEEPSEEK_API_KEY', None),
+            'deepseek_model': self._get_config_value('llm', 'deepseek_model', 'DEEPSEEK_MODEL', 'deepseek-chat'),
+            'deepseek_base_url': self._get_config_value('llm', 'deepseek_base_url', 'DEEPSEEK_BASE_URL', 'https://api.deepseek.com/v1'),
+            
+            # 通用配置
+            'preferred_provider': self._get_config_value('llm', 'preferred_provider', 'LLM_PREFERRED_PROVIDER', None),
+            'max_retries': self._get_config_value('llm', 'max_retries', 'LLM_MAX_RETRIES', 3, int),
+            'timeout': self._get_config_value('llm', 'timeout', 'LLM_TIMEOUT', 60, int),
+            'max_content_length': self._get_config_value('llm', 'max_content_length', 'LLM_MAX_CONTENT_LENGTH', 16000, int)
+        }
 
 # 创建一个全局配置实例，供其他模块使用
 config = Config()

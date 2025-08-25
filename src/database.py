@@ -195,11 +195,14 @@ class DatabaseManager:
                 created_at TIMESTAMP NOT NULL COMMENT '帖子创建时间',
                 last_activity_at TIMESTAMP NOT NULL COMMENT '最后活跃时间',
                 tags VARCHAR(500) COMMENT '标签，逗号分隔',
+                total_like_count INT UNSIGNED DEFAULT 0 COMMENT '主题下所有回复的总点赞数',
+                hotness_score DECIMAL(10, 4) DEFAULT 0.0 COMMENT '热度分数，基于浏览数、回复数、点赞数和时间衰减',
                 crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录首次抓取和更新的时间',
                 
                 INDEX idx_last_activity (last_activity_at),
                 INDEX idx_created_at (created_at),
                 INDEX idx_reply_count (reply_count),
+                INDEX idx_hotness_score (hotness_score),
                 FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=COMPRESSED;
             """,
@@ -221,12 +224,45 @@ class DatabaseManager:
                 FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=COMPRESSED;
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS reports (
+                id MEDIUMINT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT '报告唯一ID',
+                category VARCHAR(50) NOT NULL COMMENT '分析的板块分类',
+                report_type ENUM('hotspot', 'trend', 'summary') DEFAULT 'hotspot' COMMENT '报告类型',
+                analysis_period_start TIMESTAMP NOT NULL COMMENT '分析数据的起始时间',
+                analysis_period_end TIMESTAMP NOT NULL COMMENT '分析数据的结束时间',
+                topics_analyzed SMALLINT UNSIGNED DEFAULT 0 COMMENT '分析的主题数量',
+                report_title VARCHAR(200) NOT NULL COMMENT '报告标题',
+                report_content MEDIUMTEXT NOT NULL COMMENT '报告内容(Markdown格式)',
+                generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '报告生成时间',
+                
+                INDEX idx_category (category),
+                INDEX idx_generated_at (generated_at),
+                INDEX idx_analysis_period (analysis_period_start, analysis_period_end)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=COMPRESSED;
             """
         ]
         
         with self.get_cursor() as (cursor, connection):
             for sql in create_tables_sql:
                 cursor.execute(sql)
+            
+            # 升级现有表结构：为topics表添加热度相关字段
+            try:
+                cursor.execute("SHOW COLUMNS FROM topics LIKE 'total_like_count'")
+                if cursor.rowcount == 0:
+                    cursor.execute("ALTER TABLE topics ADD COLUMN total_like_count INT UNSIGNED DEFAULT 0 COMMENT '主题下所有回复的总点赞数'")
+                    self.logger.info("已为topics表添加total_like_count字段")
+                    
+                cursor.execute("SHOW COLUMNS FROM topics LIKE 'hotness_score'")
+                if cursor.rowcount == 0:
+                    cursor.execute("ALTER TABLE topics ADD COLUMN hotness_score DECIMAL(10, 4) DEFAULT 0.0 COMMENT '热度分数，基于浏览数、回复数、点赞数和时间衰减'")
+                    cursor.execute("ALTER TABLE topics ADD INDEX idx_hotness_score (hotness_score)")
+                    self.logger.info("已为topics表添加hotness_score字段和索引")
+            except Exception as e:
+                self.logger.warning(f"升级表结构时出错: {e}")
+            
             connection.commit()
             self.logger.info("数据库表结构初始化完成")
     
@@ -438,6 +474,219 @@ class DatabaseManager:
             connection.commit()
             self.logger.info(f"清理了 {deleted_count} 个过期主题及其相关数据")
             return deleted_count
+    
+    def update_total_likes(self, topic_ids: List[int] = None) -> int:
+        """更新主题的总点赞数"""
+        if topic_ids is None:
+            # 更新所有主题
+            sql = """
+            UPDATE topics t SET total_like_count = (
+                SELECT COALESCE(SUM(p.like_count), 0)
+                FROM posts p 
+                WHERE p.topic_id = t.id
+            )
+            """
+            params = None
+        else:
+            # 更新指定主题
+            if not topic_ids:
+                return 0
+            placeholders = ','.join(['%s'] * len(topic_ids))
+            sql = f"""
+            UPDATE topics t SET total_like_count = (
+                SELECT COALESCE(SUM(p.like_count), 0)
+                FROM posts p 
+                WHERE p.topic_id = t.id
+            )
+            WHERE t.id IN ({placeholders})
+            """
+            params = topic_ids
+        
+        with self.get_cursor() as (cursor, connection):
+            cursor.execute(sql, params)
+            updated_count = cursor.rowcount
+            connection.commit()
+            self.logger.info(f"更新了 {updated_count} 个主题的总点赞数")
+            return updated_count
+    
+    def update_hotness_scores(self, topic_ids: List[int] = None, 
+                            view_weight: float = 1.0, 
+                            reply_weight: float = 5.0, 
+                            like_weight: float = 3.0,
+                            time_decay_hours: int = 168) -> int:  # 168小时 = 7天
+        """
+        更新主题的热度分数
+        
+        热度计算公式: (view_count * view_weight + reply_count * reply_weight + total_like_count * like_weight) 
+                    * time_decay_factor
+        
+        时间衰减因子: max(0.1, 1 - (当前时间 - 最后活跃时间) / time_decay_hours)
+        """
+        if topic_ids is None:
+            # 更新所有主题
+            sql = f"""
+            UPDATE topics 
+            SET hotness_score = GREATEST(0.1,
+                (view_count * %s + reply_count * %s + total_like_count * %s) *
+                GREATEST(0.1, 1 - TIMESTAMPDIFF(HOUR, last_activity_at, NOW()) / %s)
+            )
+            """
+            params = (view_weight, reply_weight, like_weight, time_decay_hours)
+        else:
+            # 更新指定主题
+            if not topic_ids:
+                return 0
+            placeholders = ','.join(['%s'] * len(topic_ids))
+            sql = f"""
+            UPDATE topics 
+            SET hotness_score = GREATEST(0.1,
+                (view_count * %s + reply_count * %s + total_like_count * %s) *
+                GREATEST(0.1, 1 - TIMESTAMPDIFF(HOUR, last_activity_at, NOW()) / %s)
+            )
+            WHERE id IN ({placeholders})
+            """
+            params = (view_weight, reply_weight, like_weight, time_decay_hours) + tuple(topic_ids)
+        
+        with self.get_cursor() as (cursor, connection):
+            cursor.execute(sql, params)
+            updated_count = cursor.rowcount
+            connection.commit()
+            self.logger.info(f"更新了 {updated_count} 个主题的热度分数")
+            return updated_count
+    
+    def get_hot_topics_by_category(self, category: str, limit: int = 30, 
+                                  hours_back: int = 24) -> List[Dict[str, Any]]:
+        """获取指定分类在指定时间内的热门主题"""
+        sql = """
+        SELECT id, title, url, category, author_id, reply_count, view_count, 
+               total_like_count, hotness_score, created_at, last_activity_at
+        FROM topics 
+        WHERE category = %s 
+          AND (created_at >= DATE_SUB(NOW(), INTERVAL %s HOUR) 
+               OR last_activity_at >= DATE_SUB(NOW(), INTERVAL %s HOUR))
+        ORDER BY hotness_score DESC 
+        LIMIT %s
+        """
+        
+        with self.get_cursor() as (cursor, connection):
+            cursor.execute(sql, (category, hours_back, hours_back, limit))
+            return cursor.fetchall()
+    
+    def get_recent_active_topics(self, hours_back: int = 24) -> List[Dict[str, Any]]:
+        """获取最近有活动的主题列表"""
+        sql = """
+        SELECT id, title, url, category, author_id, reply_count, view_count, 
+               total_like_count, hotness_score, created_at, last_activity_at
+        FROM topics 
+        WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s HOUR) 
+           OR last_activity_at >= DATE_SUB(NOW(), INTERVAL %s HOUR)
+        ORDER BY last_activity_at DESC
+        """
+        
+        with self.get_cursor() as (cursor, connection):
+            cursor.execute(sql, (hours_back, hours_back))
+            return cursor.fetchall()
+    
+    def get_topic_posts_for_analysis(self, topic_id: int, limit: int = 10) -> Dict[str, Any]:
+        """获取主题及其精选回复用于分析"""
+        topic_sql = """
+        SELECT id, title, url, category, reply_count, view_count, 
+               total_like_count, hotness_score, created_at, last_activity_at
+        FROM topics 
+        WHERE id = %s
+        """
+        
+        # 获取主贴内容（post_number = 1）
+        main_post_sql = """
+        SELECT content_raw, like_count, created_at
+        FROM posts 
+        WHERE topic_id = %s AND post_number = 1
+        """
+        
+        # 获取精选回复（按点赞数和内容长度排序，排除主贴）
+        replies_sql = """
+        SELECT content_raw, like_count, post_number, created_at
+        FROM posts 
+        WHERE topic_id = %s AND post_number > 1 AND content_raw IS NOT NULL
+        ORDER BY like_count DESC, CHAR_LENGTH(content_raw) DESC
+        LIMIT %s
+        """
+        
+        with self.get_cursor() as (cursor, connection):
+            # 获取主题信息
+            cursor.execute(topic_sql, (topic_id,))
+            topic = cursor.fetchone()
+            if not topic:
+                return None
+            
+            # 获取主贴
+            cursor.execute(main_post_sql, (topic_id,))
+            main_post = cursor.fetchone()
+            
+            # 获取精选回复
+            cursor.execute(replies_sql, (topic_id, limit))
+            replies = cursor.fetchall()
+            
+            return {
+                'topic': topic,
+                'main_post': main_post,
+                'replies': replies
+            }
+    
+    def save_report(self, report_data: Dict[str, Any]) -> int:
+        """保存分析报告到数据库"""
+        sql = """
+        INSERT INTO reports (category, report_type, analysis_period_start, analysis_period_end,
+                           topics_analyzed, report_title, report_content)
+        VALUES (%(category)s, %(report_type)s, %(analysis_period_start)s, %(analysis_period_end)s,
+                %(topics_analyzed)s, %(report_title)s, %(report_content)s)
+        """
+        
+        with self.get_cursor() as (cursor, connection):
+            cursor.execute(sql, report_data)
+            report_id = cursor.lastrowid
+            connection.commit()
+            self.logger.info(f"保存报告成功，ID: {report_id}")
+            return report_id
+    
+    def get_recent_reports(self, category: str = None, limit: int = 10) -> List[Dict[str, Any]]:
+        """获取最近的分析报告"""
+        if category:
+            sql = """
+            SELECT id, category, report_type, analysis_period_start, analysis_period_end,
+                   topics_analyzed, report_title, generated_at
+            FROM reports 
+            WHERE category = %s
+            ORDER BY generated_at DESC 
+            LIMIT %s
+            """
+            params = (category, limit)
+        else:
+            sql = """
+            SELECT id, category, report_type, analysis_period_start, analysis_period_end,
+                   topics_analyzed, report_title, generated_at
+            FROM reports 
+            ORDER BY generated_at DESC 
+            LIMIT %s
+            """
+            params = (limit,)
+        
+        with self.get_cursor() as (cursor, connection):
+            cursor.execute(sql, params)
+            return cursor.fetchall()
+    
+    def get_report_content(self, report_id: int) -> Optional[Dict[str, Any]]:
+        """获取完整的报告内容"""
+        sql = """
+        SELECT id, category, report_type, analysis_period_start, analysis_period_end,
+               topics_analyzed, report_title, report_content, generated_at
+        FROM reports 
+        WHERE id = %s
+        """
+        
+        with self.get_cursor() as (cursor, connection):
+            cursor.execute(sql, (report_id,))
+            return cursor.fetchone()
 
 
 # 全局数据库管理实例

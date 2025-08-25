@@ -10,6 +10,8 @@ from .logger import setup_logging, log_task_start, log_task_end, log_error
 from .database import db_manager
 from .concurrent_crawler import ConcurrentCrawler
 from .data_cleaner import data_cleaner
+from .analyzer import hotness_analyzer
+from .report_generator import report_generator
 from .config import config
 
 
@@ -143,6 +145,70 @@ class TaskScheduler:
                 'error': str(e)
             }
     
+    def run_analysis_task(self, hours_back: int = 24, analyze_all: bool = False) -> Dict[str, Any]:
+        """执行热度分析任务"""
+        task_name = f"热度分析 ({'全量' if analyze_all else f'最近{hours_back}小时'})"
+        start_time = log_task_start(task_name)
+        
+        try:
+            if analyze_all:
+                # 分析所有主题
+                result = hotness_analyzer.analyze_all_topics()
+            else:
+                # 分析最近活跃的主题
+                result = hotness_analyzer.analyze_recent_topics(hours_back)
+            
+            # 获取热度统计
+            stats_result = hotness_analyzer.get_hotness_stats()
+            result['hotness_stats'] = stats_result
+            
+            log_task_end(task_name, start_time,
+                        analyzed_topics=result.get('analyzed_topics', result.get('updated_scores', 0)))
+            
+            return result
+            
+        except Exception as e:
+            log_error(task_name, e)
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    async def run_report_task(self, category: str = None, hours_back: int = 24) -> Dict[str, Any]:
+        """执行智能分析报告任务"""
+        if category:
+            task_name = f"智能分析报告 - {category}板块"
+        else:
+            task_name = "智能分析报告 - 所有板块"
+        
+        start_time = log_task_start(task_name)
+        
+        try:
+            if category:
+                # 生成指定分类的报告
+                result = await report_generator.generate_category_report(category, hours_back)
+            else:
+                # 生成所有分类的报告
+                result = await report_generator.generate_all_categories_report(hours_back)
+            
+            if result.get('success'):
+                if category:
+                    log_task_end(task_name, start_time, 
+                                topics_analyzed=result.get('topics_analyzed', 0))
+                else:
+                    log_task_end(task_name, start_time,
+                                total_reports=result.get('successful_reports', 0),
+                                total_topics=result.get('total_topics_analyzed', 0))
+            
+            return result
+            
+        except Exception as e:
+            log_error(task_name, e)
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
     async def run_full_maintenance(self) -> Dict[str, Any]:
         """执行完整维护任务"""
         task_name = "完整维护"
@@ -155,11 +221,15 @@ class TaskScheduler:
             self.logger.info("执行爬取任务...")
             results['crawl'] = await self.run_crawl_task()
             
-            # 2. 执行清理任务
+            # 2. 执行热度分析任务（分析爬取到的数据）
+            self.logger.info("执行热度分析任务...")
+            results['analysis'] = self.run_analysis_task(hours_back=24, analyze_all=False)
+            
+            # 3. 执行清理任务
             self.logger.info("执行清理任务...")
             results['cleanup'] = self.run_cleanup_task()
             
-            # 3. 获取最终统计
+            # 4. 获取最终统计
             self.logger.info("获取统计信息...")
             results['stats'] = self.run_stats_task()
             
