@@ -101,6 +101,9 @@ class TaskScheduler:
         start_time = log_task_start(task_name)
         
         try:
+            # 初始化数据库（确保表结构存在）
+            self.logger.info("初始化数据库...")
+            db_manager.init_database()
             # 获取清理前的统计信息
             stats_before = data_cleaner.get_database_stats()
             self.logger.info(f"清理前统计: {stats_before}")
@@ -139,6 +142,9 @@ class TaskScheduler:
         start_time = log_task_start(task_name)
         
         try:
+            # 初始化数据库（确保表结构存在）
+            self.logger.info("初始化数据库...")
+            db_manager.init_database()
             stats = data_cleaner.get_database_stats()
             
             log_task_end(task_name, start_time)
@@ -161,6 +167,9 @@ class TaskScheduler:
         start_time = log_task_start(task_name)
         
         try:
+            # 初始化数据库（确保表结构存在）
+            self.logger.info("初始化数据库...")
+            db_manager.init_database()
             if analyze_all:
                 # 分析所有主题
                 result = hotness_analyzer.analyze_all_topics()
@@ -194,6 +203,9 @@ class TaskScheduler:
         start_time = log_task_start(task_name)
         
         try:
+            # 初始化数据库（确保reports表存在）
+            self.logger.info("初始化数据库...")
+            db_manager.init_database()
             if category:
                 # 生成指定分类的报告
                 result = await report_generator.generate_category_report(category, hours_back)
