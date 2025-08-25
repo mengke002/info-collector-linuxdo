@@ -1,284 +1,124 @@
-"""
-LLM集成模块
-支持多种大语言模型服务的统一接口
+"""LLM客户端模块
+支持OpenAI compatible接口的streaming实现
 """
 import logging
-import json
-import asyncio
-from typing import Dict, Any, Optional, List
-from abc import ABC, abstractmethod
-import aiohttp
-from urllib.parse import urljoin
+from typing import Dict, Any
+from openai import OpenAI
 
-from .config import config
-
-
-class BaseLLMClient(ABC):
-    """LLM客户端基类"""
-    
-    def __init__(self, provider_name: str):
-        self.provider_name = provider_name
-        self.logger = logging.getLogger(__name__)
-    
-    @abstractmethod
-    async def analyze_content(self, content: str, prompt_template: str) -> Dict[str, Any]:
-        """分析内容并返回结果"""
-        pass
-    
-    def _format_prompt(self, content: str, template: str) -> str:
-        """格式化提示词"""
-        return template.format(content=content)
+try:
+    from .config import config
+except ImportError:
+    # 当作脚本直接运行时的导入
+    from config import config
 
 
-class OpenAIClient(BaseLLMClient):
-    """OpenAI API客户端"""
+class LLMClient:
+    """简化的LLM客户端，仅支持OpenAI compatible接口"""
     
     def __init__(self):
-        super().__init__("OpenAI")
+        self.logger = logging.getLogger(__name__)
+        
+        # 从配置文件获取配置（按优先级：环境变量 > config.ini > 默认值）
         llm_config = config.get_llm_config()
         self.api_key = llm_config.get('openai_api_key')
         self.model = llm_config.get('openai_model', 'gpt-3.5-turbo')
         self.base_url = llm_config.get('openai_base_url', 'https://api.openai.com/v1')
-        self.max_retries = llm_config.get('max_retries', 3)
-        self.timeout = llm_config.get('timeout', 30)
         
         if not self.api_key:
-            raise ValueError("OpenAI API key not configured")
-    
-    async def analyze_content(self, content: str, prompt_template: str) -> Dict[str, Any]:
-        """使用OpenAI API分析内容"""
-        prompt = self._format_prompt(content, prompt_template)
-        
-        headers = {
-            'Authorization': f'Bearer {self.api_key}',
-            'Content-Type': 'application/json'
-        }
-        
-        data = {
-            'model': self.model,
-            'messages': [
-                {'role': 'system', 'content': '你是一个专业的内容分析师，擅长总结和提取关键信息。'},
-                {'role': 'user', 'content': prompt}
-            ],
-            'temperature': 0.3,
-            'max_tokens': 1000
-        }
-        
-        url = urljoin(self.base_url, '/chat/completions')
-        
-        for attempt in range(self.max_retries):
-            try:
-                timeout = aiohttp.ClientTimeout(total=self.timeout)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.post(url, headers=headers, json=data) as response:
-                        if response.status == 200:
-                            result = await response.json()
-                            content = result['choices'][0]['message']['content']
-                            
-                            return {
-                                'success': True,
-                                'content': content,
-                                'provider': self.provider_name,
-                                'model': self.model,
-                                'usage': result.get('usage', {})
-                            }
-                        else:
-                            error_text = await response.text()
-                            error_msg = f"API请求失败: {response.status} - {error_text}"
-                            self.logger.warning(error_msg)
-                            
-                            if attempt == self.max_retries - 1:
-                                return {
-                                    'success': False,
-                                    'error': error_msg,
-                                    'provider': self.provider_name
-                                }
-                    
-            except Exception as e:
-                error_msg = f"请求异常: {str(e)}"
-                self.logger.warning(f"第{attempt + 1}次尝试失败: {error_msg}")
-                
-                if attempt == self.max_retries - 1:
-                    return {
-                        'success': False,
-                        'error': error_msg,
-                        'provider': self.provider_name
-                    }
-                
-                # 指数退避
-                await asyncio.sleep(2 ** attempt)
-
-
-class DeepSeekClient(BaseLLMClient):
-    """DeepSeek API客户端"""
-    
-    def __init__(self):
-        super().__init__("DeepSeek")
-        llm_config = config.get_llm_config()
-        self.api_key = llm_config.get('deepseek_api_key')
-        self.model = llm_config.get('deepseek_model', 'deepseek-chat')
-        self.base_url = llm_config.get('deepseek_base_url', 'https://api.deepseek.com/v1')
-        self.max_retries = llm_config.get('max_retries', 3)
-        self.timeout = llm_config.get('timeout', 30)
-        
-        if not self.api_key:
-            raise ValueError("DeepSeek API key not configured")
-    
-    async def analyze_content(self, content: str, prompt_template: str) -> Dict[str, Any]:
-        """使用DeepSeek API分析内容"""
-        prompt = self._format_prompt(content, prompt_template)
-        
-        headers = {
-            'Authorization': f'Bearer {self.api_key}',
-            'Content-Type': 'application/json'
-        }
-        
-        data = {
-            'model': self.model,
-            'messages': [
-                {'role': 'system', 'content': '你是一个专业的内容分析师，擅长总结和提取关键信息。'},
-                {'role': 'user', 'content': prompt}
-            ],
-            'temperature': 0.3,
-            'max_tokens': 1000
-        }
-        
-        url = urljoin(self.base_url, '/chat/completions')
-        
-        for attempt in range(self.max_retries):
-            try:
-                timeout = aiohttp.ClientTimeout(total=self.timeout)
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.post(url, headers=headers, json=data) as response:
-                        if response.status == 200:
-                            result = await response.json()
-                            content = result['choices'][0]['message']['content']
-                            
-                            return {
-                                'success': True,
-                                'content': content,
-                                'provider': self.provider_name,
-                                'model': self.model,
-                                'usage': result.get('usage', {})
-                            }
-                        else:
-                            error_text = await response.text()
-                            error_msg = f"API请求失败: {response.status} - {error_text}"
-                            self.logger.warning(error_msg)
-                            
-                            if attempt == self.max_retries - 1:
-                                return {
-                                    'success': False,
-                                    'error': error_msg,
-                                    'provider': self.provider_name
-                                }
-                    
-            except Exception as e:
-                error_msg = f"请求异常: {str(e)}"
-                self.logger.warning(f"第{attempt + 1}次尝试失败: {error_msg}")
-                
-                if attempt == self.max_retries - 1:
-                    return {
-                        'success': False,
-                        'error': error_msg,
-                        'provider': self.provider_name
-                    }
-                
-                # 指数退避
-                await asyncio.sleep(2 ** attempt)
-
-
-class MockLLMClient(BaseLLMClient):
-    """模拟LLM客户端，用于测试"""
-    
-    def __init__(self):
-        super().__init__("Mock")
-    
-    async def analyze_content(self, content: str, prompt_template: str) -> Dict[str, Any]:
-        """模拟分析内容"""
-        return {
-            'success': True,
-            'content': f"[模拟分析结果] 这是对内容的模拟分析：{content[:100]}...",
-            'provider': self.provider_name,
-            'model': 'mock-model'
-        }
-
-
-class LLMManager:
-    """LLM管理器，负责选择和调用合适的LLM客户端"""
-    
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
-        self.clients: Dict[str, BaseLLMClient] = {}
-        self._init_clients()
-    
-    def _init_clients(self):
-        """初始化可用的LLM客户端"""
-        llm_config = config.get_llm_config()
+            raise ValueError("未找到OPENAI_API_KEY配置，请在环境变量或config.ini中设置")
         
         # 初始化OpenAI客户端
-        if llm_config.get('openai_api_key'):
-            try:
-                self.clients['openai'] = OpenAIClient()
-                self.logger.info("OpenAI客户端初始化成功")
-            except Exception as e:
-                self.logger.warning(f"OpenAI客户端初始化失败: {e}")
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url
+        )
         
-        # 初始化DeepSeek客户端
-        if llm_config.get('deepseek_api_key'):
-            try:
-                self.clients['deepseek'] = DeepSeekClient()
-                self.logger.info("DeepSeek客户端初始化成功")
-            except Exception as e:
-                self.logger.warning(f"DeepSeek客户端初始化失败: {e}")
-        
-        # 总是初始化Mock客户端作为后备
-        self.clients['mock'] = MockLLMClient()
-        
-        if not self.clients:
-            self.logger.warning("没有可用的LLM客户端")
+        self.logger.info(f"LLM客户端初始化成功 - Model: {self.model}, Base URL: {self.base_url}")
     
-    def get_available_providers(self) -> List[str]:
-        """获取可用的LLM提供商列表"""
-        return list(self.clients.keys())
-    
-    async def analyze_content(self, content: str, prompt_template: str, 
-                            preferred_provider: str = None) -> Dict[str, Any]:
-        """分析内容，自动选择最佳的LLM客户端"""
-        
-        # 确定使用的客户端
-        client = None
-        
-        if preferred_provider and preferred_provider in self.clients:
-            client = self.clients[preferred_provider]
-            self.logger.info(f"使用指定的LLM提供商: {preferred_provider}")
-        else:
-            # 按优先级选择客户端
-            priority_order = ['openai', 'deepseek', 'mock']
-            for provider in priority_order:
-                if provider in self.clients:
-                    client = self.clients[provider]
-                    self.logger.info(f"自动选择LLM提供商: {provider}")
-                    break
-        
-        if not client:
-            return {
-                'success': False,
-                'error': '没有可用的LLM客户端',
-                'provider': None
-            }
-        
+    def analyze_content(self, content: str, prompt_template: str) -> Dict[str, Any]:
+        """使用streaming方式分析内容"""
         try:
-            result = await client.analyze_content(content, prompt_template)
-            return result
+            # 格式化提示词
+            prompt = prompt_template.format(content=content)
+            
+            # 调试输出：显示请求信息
+            self.logger.info("=== LLM 请求调试信息 ===")
+            self.logger.info(f"模型: {self.model}")
+            self.logger.info(f"内容长度: {len(content)} 字符")
+            self.logger.info(f"提示词长度: {len(prompt)} 字符")
+            self.logger.info(f"内容预览: {content[:200]}...")
+            
+            # 创建streaming请求
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {'role': 'system', 'content': '你是一个专业的内容分析师，擅长总结和提取关键信息。'},
+                    {'role': 'user', 'content': prompt}
+                ],
+                temperature=0.3,
+                stream=True
+            )
+            
+            # 收集所有streaming内容
+            full_content = ""
+            reasoning_content_full = ""
+            chunk_count = 0
+            
+            self.logger.info("开始streaming响应处理...")
+            
+            for chunk in response:
+                chunk_count += 1
+                delta = chunk.choices[0].delta
+                
+                # 安全地获取reasoning_content和content
+                reasoning_content = getattr(delta, 'reasoning_content', None)
+                content_chunk = getattr(delta, 'content', None)
+                
+                if reasoning_content:
+                    # 推理内容单独收集，但不加入最终结果
+                    reasoning_content_full += reasoning_content
+                    self.logger.debug(f"Chunk {chunk_count} - Reasoning: {reasoning_content[:50]}...")
+                
+                if content_chunk:
+                    # 只收集最终的content内容
+                    full_content += content_chunk
+                    self.logger.debug(f"Chunk {chunk_count} - Content: {content_chunk[:50]}...")
+            
+            # 调试输出：显示响应结果
+            self.logger.info("=== LLM 响应调试信息 ===")
+            self.logger.info(f"处理了 {chunk_count} 个 chunks")
+            if reasoning_content_full:
+                self.logger.info(f"推理内容长度: {len(reasoning_content_full)} 字符")
+                self.logger.info(f"推理内容预览: {reasoning_content_full[:200]}...")
+            self.logger.info(f"最终内容长度: {len(full_content)} 字符")
+            self.logger.info(f"最终内容预览: {full_content[:300]}...")
+            self.logger.info("=== LLM 最终内容 ===")
+            self.logger.info(full_content)
+            self.logger.info("=== LLM 响应结束 ===")
+            
+            return {
+                'success': True,
+                'content': full_content,
+                'provider': 'openai_compatible',
+                'model': self.model
+            }
+            
         except Exception as e:
-            self.logger.error(f"LLM分析失败: {e}")
+            error_msg = f"LLM分析失败: {str(e)}"
+            self.logger.error(error_msg)
+            self.logger.error(f"错误类型: {type(e).__name__}")
+            import traceback
+            self.logger.error(f"堆栈追踪: {traceback.format_exc()}")
             return {
                 'success': False,
-                'error': str(e),
-                'provider': client.provider_name
+                'error': error_msg,
+                'provider': 'openai_compatible'
             }
 
 
-# 全局LLM管理器实例
-llm_manager = LLMManager()
+# 全局LLM客户端实例
+try:
+    llm_client = LLMClient()
+except Exception as e:
+    logging.getLogger(__name__).warning(f"LLM客户端初始化失败: {e}")
+    llm_client = None

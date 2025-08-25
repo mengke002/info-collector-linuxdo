@@ -163,7 +163,8 @@ jobs:
       
   analysis:
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'analysis'
+    needs: crawl
+    if: github.event.schedule == '*/30 * * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'analysis')
     
     steps:
     - name: Checkout code
