@@ -237,29 +237,29 @@ class ReportGenerator:
         
         return "\n".join(report_lines)
     
-    async def generate_category_report(self, category: str, hours_back: int = 24) -> Dict[str, Any]:
-        """生成指定分类的热点分析报告"""
+    async def generate_category_report(self, category: str = None, hours_back: int = 24) -> Dict[str, Any]:
+        """生成热点分析报告（不再按分类筛选，从所有数据中获取热门主题）"""
         try:
-            self.logger.info(f"开始生成 {category} 板块的热点分析报告 (回溯 {hours_back} 小时)")
+            report_title = "全站热点分析报告" if category is None else f"{category} 板块热点分析报告"
+            self.logger.info(f"开始生成 {report_title} (回溯 {hours_back} 小时)")
             
             # 设置分析时间范围
             end_time = self.get_beijing_time()
             start_time = end_time - timedelta(hours=hours_back)
             
-            # 获取该分类的热门主题
-            hot_topics = self.db.get_hot_topics_by_category(
-                category=category, 
+            # 获取所有热门主题（不按分类筛选）
+            hot_topics = self.db.get_hot_topics_all(
                 limit=self.top_topics_per_category, 
                 hours_back=hours_back
             )
             
             if not hot_topics:
-                self.logger.warning(f"{category} 板块在过去 {hours_back} 小时内没有热门主题")
+                self.logger.warning(f"过去 {hours_back} 小时内没有热门主题")
                 return {
                     'success': True,
-                    'category': category,
+                    'category': category or '全站',
                     'topics_analyzed': 0,
-                    'message': f'{category} 板块暂无热门内容'
+                    'message': f'过去 {hours_back} 小时内暂无热门内容'
                 }
             
             self.logger.info(f"找到 {len(hot_topics)} 个热门主题，开始LLM分析")
@@ -301,7 +301,7 @@ class ReportGenerator:
             
             # 生成Markdown报告
             report_content = self._generate_report_markdown(
-                category=category,
+                category=category or '全站',
                 analysis_results=successful_analyses,
                 period_start=start_time,
                 period_end=end_time
@@ -309,12 +309,12 @@ class ReportGenerator:
             
             # 保存报告到数据库
             report_data = {
-                'category': category,
+                'category': category or '全站',
                 'report_type': 'hotspot',
                 'analysis_period_start': start_time,
                 'analysis_period_end': end_time,
                 'topics_analyzed': len(successful_analyses),
-                'report_title': f'[{category}] 板块热点分析报告',
+                'report_title': f'[{category or "全站"}] 热点分析报告',
                 'report_content': report_content
             }
             
@@ -322,7 +322,7 @@ class ReportGenerator:
             
             result = {
                 'success': True,
-                'category': category,
+                'category': category or '全站',
                 'report_id': report_id,
                 'topics_analyzed': len(successful_analyses),
                 'total_topics_found': len(hot_topics),
@@ -334,82 +334,55 @@ class ReportGenerator:
                 'report_preview': report_content[:500] + "..." if len(report_content) > 500 else report_content
             }
             
-            self.logger.info(f"{category} 板块分析完成: 分析了 {len(successful_analyses)}/{len(hot_topics)} 个主题，报告ID: {report_id}")
+            self.logger.info(f"{category or '全站'} 分析完成: 分析了 {len(successful_analyses)}/{len(hot_topics)} 个主题，报告ID: {report_id}")
             return result
             
         except Exception as e:
-            self.logger.error(f"生成 {category} 板块报告时出错: {e}")
+            self.logger.error(f"生成 {category or '全站'} 报告时出错: {e}")
             return {
                 'success': False,
                 'error': str(e),
-                'category': category,
+                'category': category or '全站',
                 'topics_analyzed': 0
             }
     
     async def generate_all_categories_report(self, hours_back: int = 24) -> Dict[str, Any]:
-        """生成所有分类的热点分析报告"""
+        """生成全站热点分析报告（不再按分类）"""
         try:
-            self.logger.info(f"开始生成所有板块的热点分析报告 (回溯 {hours_back} 小时)")
+            self.logger.info(f"开始生成全站热点分析报告 (回溯 {hours_back} 小时)")
             
-            # 获取所有目标分类
-            target_urls = config.get_target_urls()
-            categories = list(target_urls.keys())
+            # 直接生成一个全站报告
+            result = await self.generate_category_report(category=None, hours_back=hours_back)
             
-            if not categories:
+            if result.get('success'):
+                # 包装成与原格式兼容的结构
+                return {
+                    'success': True,
+                    'total_categories': 1,
+                    'successful_reports': 1,
+                    'failed_reports': 0,
+                    'total_topics_analyzed': result.get('topics_analyzed', 0),
+                    'reports': [result],
+                    'failures': [],
+                    'generation_time': self.get_beijing_time()
+                }
+            else:
                 return {
                     'success': False,
-                    'error': '没有配置目标分类',
-                    'reports': []
+                    'total_categories': 1,
+                    'successful_reports': 0,
+                    'failed_reports': 1,
+                    'total_topics_analyzed': 0,
+                    'reports': [],
+                    'failures': [{
+                        'category': '全站',
+                        'error': result.get('error', '未知错误')
+                    }],
+                    'generation_time': self.get_beijing_time()
                 }
             
-            # 并发生成所有分类的报告
-            report_tasks = [
-                self.generate_category_report(category, hours_back) 
-                for category in categories
-            ]
-            
-            report_results = await asyncio.gather(*report_tasks, return_exceptions=True)
-            
-            # 整理结果
-            successful_reports = []
-            failed_reports = []
-            
-            for i, result in enumerate(report_results):
-                category = categories[i]
-                
-                if isinstance(result, dict):
-                    if result.get('success'):
-                        successful_reports.append(result)
-                    else:
-                        failed_reports.append({
-                            'category': category,
-                            'error': result.get('error', '未知错误')
-                        })
-                elif isinstance(result, Exception):
-                    failed_reports.append({
-                        'category': category,
-                        'error': str(result)
-                    })
-            
-            total_topics_analyzed = sum(r.get('topics_analyzed', 0) for r in successful_reports)
-            
-            result = {
-                'success': len(successful_reports) > 0,
-                'total_categories': len(categories),
-                'successful_reports': len(successful_reports),
-                'failed_reports': len(failed_reports),
-                'total_topics_analyzed': total_topics_analyzed,
-                'reports': successful_reports,
-                'failures': failed_reports,
-                'generation_time': self.get_beijing_time()
-            }
-            
-            self.logger.info(f"所有板块分析完成: 成功 {len(successful_reports)}/{len(categories)} 个板块，总计分析 {total_topics_analyzed} 个主题")
-            
-            return result
-            
         except Exception as e:
-            self.logger.error(f"生成所有板块报告时出错: {e}")
+            self.logger.error(f"生成全站报告时出错: {e}")
             return {
                 'success': False,
                 'error': str(e),
