@@ -92,11 +92,26 @@ class DatabaseManager:
         # 限制内容长度 (TEXT字段最大65535字节，utf8mb4每字符最多4字节)
         if 'content_raw' in sanitized and sanitized['content_raw']:
             original_content = str(sanitized['content_raw'])
-            # 保守估计，限制为16000字符，确保不超过64KB
-            max_chars = 16000
+            # 提高限制到20000字符，更好地利用TEXT字段的容量
+            max_chars = 20000
             if len(original_content) > max_chars:
-                sanitized['content_raw'] = original_content[:max_chars] + "...[内容被截断]"
-                self.logger.warning(f"帖子内容过长被截断: {len(original_content)} -> {max_chars} 字符")
+                # 智能截断：尝试在段落、句子或空格处截断
+                truncated = original_content[:max_chars]
+                
+                # 尝试在段落分隔符处截断
+                for delimiter in ['\n\n', '\n', '。', '？', '！', '.', '?', '!']:
+                    last_pos = truncated.rfind(delimiter)
+                    if last_pos > max_chars * 0.8:  # 确保不会截掉太多内容
+                        truncated = truncated[:last_pos + len(delimiter)]
+                        break
+                else:
+                    # 如果找不到合适的分隔符，在最后一个空格处截断
+                    last_space = truncated.rfind(' ')
+                    if last_space > max_chars * 0.8:
+                        truncated = truncated[:last_space]
+                
+                sanitized['content_raw'] = truncated + "\n\n...[[内容过长已被截断]]\n原始长度: {}字符".format(len(original_content))
+                self.logger.warning(f"帖子内容过长被截断: {len(original_content)} -> {len(truncated)} 字符")
             else:
                 sanitized['content_raw'] = original_content
         
@@ -115,9 +130,9 @@ class DatabaseManager:
         
         if 'like_count' in sanitized:
             original_count = int(sanitized['like_count'] or 0)
-            sanitized['like_count'] = min(max(original_count, 0), 255)
-            if original_count > 255:
-                self.logger.warning(f"点赞数超出范围被限制: {original_count} -> 255")
+            sanitized['like_count'] = min(max(original_count, 0), 65535)
+            if original_count > 65535:
+                self.logger.warning(f"点赞数超出范围被限制: {original_count} -> 65535")
         
         return sanitized
     
@@ -214,7 +229,7 @@ class DatabaseManager:
                 post_number SMALLINT UNSIGNED NOT NULL COMMENT '楼层号',
                 reply_to_post_number SMALLINT UNSIGNED COMMENT '回复目标的楼层号，主楼则为NULL',
                 content_raw TEXT COMMENT '原始文本内容（Markdown等），最大64KB',
-                like_count TINYINT UNSIGNED DEFAULT 0 COMMENT '点赞数',
+                like_count SMALLINT UNSIGNED DEFAULT 0 COMMENT '点赞数',
                 created_at TIMESTAMP NOT NULL COMMENT '本条回复的创建时间',
                 
                 UNIQUE KEY uk_topic_post (topic_id, post_number),
@@ -260,6 +275,13 @@ class DatabaseManager:
                     cursor.execute("ALTER TABLE topics ADD COLUMN hotness_score DECIMAL(10, 4) DEFAULT 0.0 COMMENT '热度分数，基于浏览数、回复数、点赞数和时间衰减'")
                     cursor.execute("ALTER TABLE topics ADD INDEX idx_hotness_score (hotness_score)")
                     self.logger.info("已为topics表添加hotness_score字段和索引")
+                
+                # 升级posts表的like_count字段从 TINYINT 到 SMALLINT
+                cursor.execute("SHOW COLUMNS FROM posts WHERE Field = 'like_count'")
+                result = cursor.fetchone()
+                if result and 'tinyint' in result['Type'].lower():
+                    cursor.execute("ALTER TABLE posts MODIFY COLUMN like_count SMALLINT UNSIGNED DEFAULT 0 COMMENT '点赞数'")
+                    self.logger.info("已将posts表的like_count字段从 TINYINT 升级为 SMALLINT")
             except Exception as e:
                 self.logger.warning(f"升级表结构时出错: {e}")
             
