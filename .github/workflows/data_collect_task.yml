@@ -5,7 +5,7 @@ on:
     # 每30分钟运行一次爬取任务
     - cron: '*/30 * * * *'
     # 每3小时运行一次智能分析报告任务
-    - cron: '0 */3 * * *'
+    - cron: '0 8-22/2 * * *'
     # 每2天凌晨2点运行清理任务
     - cron: '0 2 */2 * *'
   workflow_dispatch:
@@ -297,7 +297,7 @@ jobs:
 
   report:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 */3 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'report')
+    if: github.event.schedule == '0 8-22/2 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'report')
     
     steps:
     - name: Checkout code
