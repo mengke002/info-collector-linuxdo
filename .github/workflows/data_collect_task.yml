@@ -2,12 +2,13 @@ name: Linux.do info collector
 
 on:
   schedule:
-    # 每30分钟运行一次爬取任务
-    - cron: '*/30 * * * *'
-    # 每3小时运行一次智能分析报告任务
-    - cron: '0 8-22/2 * * *'
-    # 每2天凌晨2点运行清理任务
-    - cron: '0 2 */2 * *'
+    # 每30分钟运行一次爬取任务，北京时间早7点到晚24点（UTC时间23:00-15:59）
+    - cron: '0,30 23 * * *'
+    - cron: '0,30 0-15 * * *'
+    # 每3小时运行一次智能分析报告任务，北京时间早8点到晚22点（UTC时间0-14点，2小时间隔）
+    - cron: '0 0-14/3 * * *'
+    # 每2天凌晨2点运行清理任务，北京时间凌晨2点（UTC前一天18点）
+    - cron: '0 18 */2 * *'
   workflow_dispatch:
     inputs:
       task:
@@ -30,7 +31,7 @@ on:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '*/30 * * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'crawl')
+    if: contains('0,30 23 * * *;0,30 0-15 * * *', github.event.schedule) || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'crawl')
     
     steps:
     - name: Checkout code
@@ -79,7 +80,7 @@ jobs:
       
   cleanup:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 2 */2 * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'cleanup')
+    if: github.event.schedule == '0 18 */2 * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'cleanup')
     
     steps:
     - name: Checkout code
@@ -164,7 +165,7 @@ jobs:
   analysis:
     runs-on: ubuntu-latest
     needs: crawl
-    if: github.event.schedule == '*/30 * * * *'
+    if: contains('0,30 23 * * *;0,30 0-15 * * *', github.event.schedule)
     
     steps:
     - name: Checkout code
@@ -297,7 +298,7 @@ jobs:
 
   report:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 8-22/2 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'report')
+    if: github.event.schedule == '0 0-14/3 * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.task == 'report')
     
     steps:
     - name: Checkout code
