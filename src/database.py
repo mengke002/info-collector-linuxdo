@@ -602,15 +602,14 @@ class DatabaseManager:
         SELECT id, title, url, category, author_id, reply_count, view_count, 
                total_like_count, hotness_score, created_at, last_activity_at
         FROM topics 
-        WHERE (created_at >= DATE_SUB(NOW(), INTERVAL %s HOUR) 
-               OR last_activity_at >= DATE_SUB(NOW(), INTERVAL %s HOUR))
+        WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s HOUR)
           AND hotness_score > 0
         ORDER BY hotness_score DESC 
         LIMIT %s
         """
         
         with self.get_cursor() as (cursor, connection):
-            cursor.execute(sql, (hours_back, hours_back, limit))
+            cursor.execute(sql, (hours_back, limit))
             return cursor.fetchall()
     
     def get_recent_active_topics(self, hours_back: int = 24) -> List[Dict[str, Any]]:
