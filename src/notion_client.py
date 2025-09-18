@@ -446,6 +446,70 @@ class NotionClient:
         
         return blocks
     
+    def _create_large_content_page(self, parent_page_id: str, page_title: str, 
+                                  content_blocks: List[Dict]) -> Dict[str, Any]:
+        """创建大内容页面，分批添加内容块"""
+        try:
+            self.logger.info(f"创建大内容页面，总共 {len(content_blocks)} 个块，需要分批处理")
+            
+            # 第一步：创建空页面，只包含前100个块
+            initial_blocks = content_blocks[:100]
+            create_result = self.create_page(parent_page_id, page_title, initial_blocks)
+            
+            if not create_result.get("success"):
+                return create_result
+            
+            page_id = create_result["data"]["id"]
+            self.logger.info(f"页面创建成功，开始添加剩余 {len(content_blocks) - 100} 个块")
+            
+            # 第二步：分批添加剩余的块
+            remaining_blocks = content_blocks[100:]
+            batch_size = 100
+            
+            for i in range(0, len(remaining_blocks), batch_size):
+                batch = remaining_blocks[i:i + batch_size]
+                batch_num = (i // batch_size) + 2
+                
+                self.logger.info(f"添加第 {batch_num} 批内容: {len(batch)} 个块")
+                
+                # 使用 PATCH 方法添加子块
+                append_result = self._append_blocks_to_page(page_id, batch)
+                
+                if not append_result.get("success"):
+                    self.logger.warning(f"第 {batch_num} 批内容添加失败: {append_result.get('error')}")
+                    # 继续尝试添加其他批次
+                else:
+                    self.logger.info(f"第 {batch_num} 批内容添加成功")
+                
+                # 添加延迟避免API限制
+                import time
+                time.sleep(0.5)
+            
+            page_url = f"https://www.notion.so/{page_id.replace('-', '')}"
+            return {
+                "success": True,
+                "data": {"id": page_id},
+                "page_url": page_url,
+                "total_blocks": len(content_blocks)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"创建大内容页面时出错: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def _append_blocks_to_page(self, page_id: str, blocks: List[Dict]) -> Dict[str, Any]:
+        """向页面追加内容块"""
+        try:
+            data = {
+                "children": blocks
+            }
+            
+            return self._make_request("PATCH", f"blocks/{page_id}/children", data)
+            
+        except Exception as e:
+            self.logger.error(f"追加内容块时出错: {e}")
+            return {"success": False, "error": str(e)}
+
     def create_report_page(self, report_title: str, report_content: str, 
                           report_date: datetime = None) -> Dict[str, Any]:
         """创建报告页面，按年/月/日层级组织"""
@@ -497,8 +561,8 @@ class NotionClient:
             # 4. 在日期页面下创建报告页面
             content_blocks = self.markdown_to_notion_blocks(report_content)
             
-            # 严格限制块数量，避免API限制
-            max_blocks = 50  # 降低限制以避免API错误
+            # 为Plus用户设置更高的块数量限制
+            max_blocks = 500  # Notion Plus用户可以支持更多块
             if len(content_blocks) > max_blocks:
                 self.logger.warning(f"报告内容过长({len(content_blocks)}个块)，截断到{max_blocks}个块")
                 content_blocks = content_blocks[:max_blocks]
@@ -515,29 +579,42 @@ class NotionClient:
                         }]
                     }
                 })
+            else:
+                self.logger.info(f"报告内容包含 {len(content_blocks)} 个块，在限制范围内")
             
             # 验证每个块的内容长度
             validated_blocks = []
-            for block in content_blocks:
+            for i, block in enumerate(content_blocks):
                 try:
                     # 检查rich_text内容长度
                     if block.get("type") in ["paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item"]:
                         block_type = block["type"]
                         rich_text = block[block_type].get("rich_text", [])
                         
-                        # 限制每个rich_text项的长度
+                        # 限制每个rich_text项的长度（Notion Plus用户可以支持更长内容）
                         for text_item in rich_text:
                             if text_item.get("text", {}).get("content"):
                                 content = text_item["text"]["content"]
-                                if len(content) > 2000:  # Notion限制
+                                if len(content) > 2000:  # Notion API限制
+                                    original_length = len(content)
                                     text_item["text"]["content"] = content[:1997] + "..."
+                                    self.logger.debug(f"块{i+1}文本被截断: {original_length} -> 2000字符")
                     
                     validated_blocks.append(block)
                 except Exception as e:
-                    self.logger.warning(f"验证块时出错，跳过: {e}")
+                    self.logger.warning(f"验证块{i+1}时出错，跳过: {e}")
                     continue
             
-            create_result = self.create_page(day_page_id, report_title, validated_blocks)
+            self.logger.info(f"内容验证完成: {len(validated_blocks)}/{len(content_blocks)} 个块通过验证")
+            
+            # Notion API限制：单次创建页面最多100个子块
+            # 需要分批处理大内容
+            if len(validated_blocks) <= 100:
+                # 小内容，直接创建
+                create_result = self.create_page(day_page_id, report_title, validated_blocks)
+            else:
+                # 大内容，分批创建
+                create_result = self._create_large_content_page(day_page_id, report_title, validated_blocks)
             
             if create_result.get("success"):
                 page_id = create_result["data"]["id"]
