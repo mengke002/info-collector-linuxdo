@@ -182,9 +182,11 @@ class ReportGenerator:
         # 生成来源清单
         for i, topic_data in enumerate(hot_topics_data, 1):
             topic_info = topic_data['topic']
+            # 将标题中的方括号替换为中文方括号，避免干扰Markdown链接解析
+            clean_title = topic_info['title'].replace('[', '【').replace(']', '】')
             # 添加锚点标识，方便内部引用
             report_lines.append(
-                f"- **[T{i}]** 📌: [{topic_info['title']}]({topic_info['url']})"
+                f"- **[T{i}]** 📌: [{clean_title}]({topic_info['url']})"
             )
 
         report_lines.extend(["", "---", ""])
@@ -574,8 +576,8 @@ class ReportGenerator:
     *   ...(给出丰富、可操作的建议)
 
 ---
-## 📚 来源清单 (Source List)
-[这里由程序自动生成，你不需要填写这部分。]
+
+**注意：请不要生成"来源清单"部分，这部分将由程序自动添加。**
 """
     
     def _analyze_all_topics_with_llm(self, hot_topics_data: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

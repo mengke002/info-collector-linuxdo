@@ -225,14 +225,19 @@ class NotionClient:
         """解析文本中的Markdown格式，支持链接、粗体等"""
         import re
         
-        rich_text = []
-        
-        # 首先处理Source引用 [Source: T1] 或 [Sources: T1, T2]
+        # 检查是否包含Source引用
         source_pattern = r'\[Sources?:\s*([T\d\s,]+)\]'
+        source_matches = list(re.finditer(source_pattern, text))
         
-        # 处理Source引用
+        if not source_matches:
+            # 没有Source引用，直接处理链接和格式
+            return self._parse_links_and_formatting(text)
+        
+        # 有Source引用，需要分段处理
+        rich_text = []
         last_end = 0
-        for match in re.finditer(source_pattern, text):
+        
+        for match in source_matches:
             # 添加Source引用前的普通文本
             if match.start() > last_end:
                 before_text = text[last_end:match.start()]
@@ -259,10 +264,6 @@ class NotionClient:
             if remaining_text:
                 rich_text.extend(self._parse_links_and_formatting(remaining_text))
         
-        # 如果没有找到Source引用，处理整个文本
-        if not rich_text:
-            rich_text = self._parse_links_and_formatting(text)
-        
         return rich_text
     
     def _parse_links_and_formatting(self, text: str) -> List[Dict]:
@@ -271,8 +272,8 @@ class NotionClient:
         
         rich_text = []
         
-        # 处理Markdown链接 [text](url)
-        link_pattern = r'\[([^\]]+)\]\(([^)]+)\)'
+        # 现在标题中的方括号已经替换为中文方括号，可以使用简单的正则表达式
+        link_pattern = r'\[([^\]]+)\]\((https?://[^)]+)\)'
         
         last_end = 0
         for match in re.finditer(link_pattern, text):
@@ -306,6 +307,59 @@ class NotionClient:
             rich_text = self._parse_text_formatting(text)
         
         return rich_text
+    
+    def _find_markdown_links(self, text: str) -> List[Dict]:
+        """手动查找Markdown链接，支持嵌套中括号"""
+        links = []
+        i = 0
+        
+        while i < len(text):
+            # 查找 ](http 模式
+            url_pattern_pos = text.find('](http', i)
+            if url_pattern_pos == -1:
+                break
+            
+            # 从这个位置往前找匹配的开始括号
+            bracket_count = 0
+            link_start = -1
+            
+            for j in range(url_pattern_pos - 1, -1, -1):
+                if text[j] == ']':
+                    bracket_count += 1
+                elif text[j] == '[':
+                    if bracket_count == 0:
+                        link_start = j
+                        break
+                    else:
+                        bracket_count -= 1
+            
+            if link_start == -1:
+                i = url_pattern_pos + 1
+                continue
+            
+            # 找到URL的结束位置
+            url_start = url_pattern_pos + 2
+            url_end = text.find(')', url_start)
+            if url_end == -1:
+                i = url_pattern_pos + 1
+                continue
+            
+            # 提取链接信息
+            link_text = text[link_start + 1:url_pattern_pos]
+            link_url = text[url_start:url_end]
+            
+            # 验证URL格式
+            if link_url.startswith(('http://', 'https://')):
+                links.append({
+                    'text': link_text,
+                    'url': link_url,
+                    'start': link_start,
+                    'end': url_end + 1
+                })
+            
+            i = url_end + 1
+        
+        return links
     
     def _parse_text_formatting(self, text: str) -> List[Dict]:
         """解析文本格式（粗体、斜体等）"""
@@ -561,8 +615,8 @@ class NotionClient:
             # 4. 在日期页面下创建报告页面
             content_blocks = self.markdown_to_notion_blocks(report_content)
             
-            # 为Plus用户设置更高的块数量限制
-            max_blocks = 500  # Notion Plus用户可以支持更多块
+            # 虽然API单次请求限制100块，但我们可以分批处理更多内容
+            max_blocks = 1000  #
             if len(content_blocks) > max_blocks:
                 self.logger.warning(f"报告内容过长({len(content_blocks)}个块)，截断到{max_blocks}个块")
                 content_blocks = content_blocks[:max_blocks]
