@@ -340,6 +340,10 @@ jobs:
         LLM_TIMEOUT: ${{ secrets.LLM_TIMEOUT }}
         LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
 
+        # --- Notion Integration (optional) ---
+        NOTION_INTEGRATION_TOKEN: ${{ secrets.NOTION_INTEGRATION_TOKEN }}
+        NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
+
         # --- Optional Secrets (with defaults in code) ---
         CRAWLER_SCAN_PAGES: ${{ secrets.CRAWLER_SCAN_PAGES }}
         CRAWLER_DELAY_SECONDS: ${{ secrets.CRAWLER_DELAY_SECONDS }}

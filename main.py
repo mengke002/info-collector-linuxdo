@@ -138,12 +138,26 @@ def print_result(result: dict, task_type: str):
             print(f"   分析主题: {result.get('topics_analyzed', 0)} 个")
             if result.get('report_id'):
                 print(f"   报告ID: {result.get('report_id')}")
+            
+            # 显示Notion推送结果
+            notion_push = result.get('notion_push')
+            if notion_push:
+                if notion_push.get('success'):
+                    print(f"   📄 Notion推送: 成功 - {notion_push.get('page_url')}")
+                else:
+                    print(f"   📄 Notion推送: 失败 - {notion_push.get('error')}")
         else:
             # 所有板块报告
             print(f"   成功板块: {result.get('successful_reports', 0)}/{result.get('total_categories', 0)}")
             print(f"   总分析主题: {result.get('total_topics_analyzed', 0)} 个")
             if result.get('failures'):
                 print(f"   失败板块: {len(result['failures'])} 个")
+            
+            # 显示Notion推送统计
+            reports = result.get('reports', [])
+            notion_success = sum(1 for r in reports if r.get('notion_push', {}).get('success'))
+            if notion_success > 0:
+                print(f"   📄 Notion推送: {notion_success}/{len(reports)} 个报告成功推送")
     
     elif task_type == 'full':
         results = result.get('results', {})

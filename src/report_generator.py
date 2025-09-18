@@ -182,8 +182,9 @@ class ReportGenerator:
         # 生成来源清单
         for i, topic_data in enumerate(hot_topics_data, 1):
             topic_info = topic_data['topic']
+            # 添加锚点标识，方便内部引用
             report_lines.append(
-                f"- **[T{i}]**: [{topic_info['title']}]({topic_info['url']})"
+                f"- **[T{i}]** 📌: [{topic_info['title']}]({topic_info['url']})"
             )
 
         report_lines.extend(["", "---", ""])
@@ -307,6 +308,44 @@ class ReportGenerator:
                 },
                 'report_preview': report_content[:500] + "..." if len(report_content) > 500 else report_content
             }
+            
+            # 尝试推送到Notion
+            try:
+                from .notion_client import notion_client
+                
+                # 格式化Notion标题
+                beijing_time = self.get_beijing_time()
+                time_str = beijing_time.strftime('%H:%M')
+                notion_title = f"[{time_str}] {category or '全站'}热点报告 ({len(hot_topics_data)}个主题)"
+                
+                self.logger.info(f"开始推送报告到Notion: {notion_title}")
+                
+                notion_result = notion_client.create_report_page(
+                    report_title=notion_title,
+                    report_content=report_content,
+                    report_date=beijing_time
+                )
+                
+                if notion_result.get('success'):
+                    self.logger.info(f"报告成功推送到Notion: {notion_result.get('page_url')}")
+                    result['notion_push'] = {
+                        'success': True,
+                        'page_url': notion_result.get('page_url'),
+                        'path': notion_result.get('path')
+                    }
+                else:
+                    self.logger.warning(f"推送到Notion失败: {notion_result.get('error')}")
+                    result['notion_push'] = {
+                        'success': False,
+                        'error': notion_result.get('error')
+                    }
+                    
+            except Exception as e:
+                self.logger.warning(f"推送到Notion时出错: {e}")
+                result['notion_push'] = {
+                    'success': False,
+                    'error': str(e)
+                }
             
             self.logger.info(f"{category or '全站'} 分析完成: 分析了 {len(hot_topics_data)}/{len(hot_topics)} 个主题，报告ID: {report_id}")
             return result

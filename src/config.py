@@ -173,6 +173,13 @@ class Config:
             # 内容处理配置
             'max_content_length': self._get_config_value('llm', 'max_content_length', 'LLM_MAX_CONTENT_LENGTH', 380000, int)
         }
+    
+    def get_notion_config(self) -> Dict[str, Any]:
+        """获取Notion配置，优先级：环境变量 > config.ini > 默认值。"""
+        return {
+            'integration_token': self._get_config_value('notion', 'integration_token', 'NOTION_INTEGRATION_TOKEN', None),
+            'parent_page_id': self._get_config_value('notion', 'parent_page_id', 'NOTION_PARENT_PAGE_ID', None)
+        }
 
 # 创建一个全局配置实例，供其他模块使用
 config = Config()
