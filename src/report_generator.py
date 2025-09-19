@@ -167,7 +167,8 @@ class ReportGenerator:
         report_lines = [
             f"# {title}",
             "",
-            f"*报告生成时间: {generate_time}*  ",
+            f"*报告生成时间: {generate_time}*",
+            "",
             f"*数据范围: {start_str} - {end_str}*",
             "",
             "---",
