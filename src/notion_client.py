@@ -778,40 +778,20 @@ class NotionClient:
                 })
             else:
                 self.logger.info(f"报告内容包含 {len(content_blocks)} 个块，在限制范围内")
-            
-            # 验证每个块的内容长度
-            validated_blocks = []
-            for i, block in enumerate(content_blocks):
-                try:
-                    # 检查rich_text内容长度
-                    if block.get("type") in ["paragraph", "heading_1", "heading_2", "heading_3", "bulleted_list_item"]:
-                        block_type = block["type"]
-                        rich_text = block[block_type].get("rich_text", [])
-                        
-                        # 限制每个rich_text项的长度（Notion Plus用户可以支持更长内容）
-                        for text_item in rich_text:
-                            if text_item.get("text", {}).get("content"):
-                                content = text_item["text"]["content"]
-                                if len(content) > 2000:  # Notion API限制
-                                    original_length = len(content)
-                                    text_item["text"]["content"] = content[:1997] + "..."
-                                    self.logger.debug(f"块{i+1}文本被截断: {original_length} -> 2000字符")
-                    
-                    validated_blocks.append(block)
-                except Exception as e:
-                    self.logger.warning(f"验证块{i+1}时出错，跳过: {e}")
-                    continue
-            
-            self.logger.info(f"内容验证完成: {len(validated_blocks)}/{len(content_blocks)} 个块通过验证")
-            
+
+            # 使用智能块分割功能处理可能超长的块
+            self.logger.info("开始智能分割超长块...")
+            processed_blocks = self._further_split_blocks(content_blocks)
+            self.logger.info(f"块分割完成: {len(content_blocks)} -> {len(processed_blocks)} 个块")
+
             # Notion API限制：单次创建页面最多100个子块
             # 需要分批处理大内容
-            if len(validated_blocks) <= 100:
+            if len(processed_blocks) <= 100:
                 # 小内容，直接创建
-                create_result = self.create_page(day_page_id, report_title, validated_blocks)
+                create_result = self.create_page(day_page_id, report_title, processed_blocks)
             else:
                 # 大内容，分批创建
-                create_result = self._create_large_content_page(day_page_id, report_title, validated_blocks)
+                create_result = self._create_large_content_page(day_page_id, report_title, processed_blocks)
             
             if create_result.get("success"):
                 page_id = create_result["data"]["id"]
@@ -831,6 +811,131 @@ class NotionClient:
         except Exception as e:
             self.logger.error(f"创建报告页面时出错: {e}")
             return {"success": False, "error": str(e)}
+
+    def _split_content_smartly(self, content: str, max_length: int) -> List[str]:
+        """智能分割内容，尽量在句号、换行等位置分割"""
+        if len(content) <= max_length:
+            return [content]
+
+        chunks = []
+        current_pos = 0
+
+        while current_pos < len(content):
+            # 计算当前块的结束位置
+            end_pos = min(current_pos + max_length, len(content))
+
+            if end_pos == len(content):
+                # 最后一块
+                chunks.append(content[current_pos:end_pos])
+                break
+
+            # 尝试在合适的位置分割
+            chunk_content = content[current_pos:end_pos]
+
+            # 查找分割点的优先级：句号 > 换行 > 逗号 > 空格
+            split_chars = ['。', '\n', '，', '、', ' ']
+            split_pos = -1
+
+            for char in split_chars:
+                pos = chunk_content.rfind(char)
+                if pos > max_length * 0.7:  # 至少要用到70%的长度才分割
+                    split_pos = pos + 1
+                    break
+
+            if split_pos > 0:
+                # 找到了合适的分割点
+                chunks.append(content[current_pos:current_pos + split_pos])
+                current_pos += split_pos
+            else:
+                # 没有找到合适的分割点，强制分割
+                chunks.append(chunk_content)
+                current_pos = end_pos
+
+        return chunks
+
+    def _split_overlong_block(self, block: Dict, block_index: int) -> List[Dict]:
+        """将超长的块分割成多个符合Notion限制的块，保持内容完整"""
+        try:
+            block_type = block["type"]
+            rich_text_list = block[block_type].get("rich_text", [])
+
+            if not rich_text_list:
+                return [block]
+
+            # 首先处理每个rich_text项的内容长度
+            processed_rich_text = []
+            for text_item in rich_text_list:
+                if not text_item.get("text", {}).get("content"):
+                    processed_rich_text.append(text_item)
+                    continue
+
+                content = text_item["text"]["content"]
+
+                # 如果单个内容超过2000字符，分割它
+                if len(content) > 2000:
+                    chunks = self._split_content_smartly(content, 1950)
+                    for chunk in chunks:
+                        chunk_item = text_item.copy()
+                        chunk_item["text"] = chunk_item["text"].copy()
+                        chunk_item["text"]["content"] = chunk
+                        processed_rich_text.append(chunk_item)
+                else:
+                    processed_rich_text.append(text_item)
+
+            # 检查rich_text数组长度是否超过100
+            if len(processed_rich_text) <= 100:
+                # 没有超长，直接返回修复后的块
+                fixed_block = block.copy()
+                fixed_block[block_type] = fixed_block[block_type].copy()
+                fixed_block[block_type]["rich_text"] = processed_rich_text
+                return [fixed_block]
+
+            # rich_text数组超长，需要分割成多个块
+            self.logger.info(f"块{block_index}的rich_text数组过长({len(processed_rich_text)}个元素)，分割成多个{block_type}块")
+
+            result_blocks = []
+            chunk_size = 99  # 每个块最多99个rich_text元素，留1个空间
+
+            for i in range(0, len(processed_rich_text), chunk_size):
+                chunk_rich_text = processed_rich_text[i:i + chunk_size]
+
+                # 创建新块
+                new_block = {
+                    "object": "block",
+                    "type": block_type,
+                    block_type: {
+                        "rich_text": chunk_rich_text
+                    }
+                }
+
+                # 如果是列表项且有子项，只在第一个块中保留子项
+                if block_type == "bulleted_list_item" and i == 0:
+                    if "children" in block[block_type]:
+                        new_block[block_type]["children"] = block[block_type]["children"]
+
+                result_blocks.append(new_block)
+
+            self.logger.debug(f"块{block_index}被分割为{len(result_blocks)}个块")
+            return result_blocks
+
+        except Exception as e:
+            self.logger.warning(f"分割块{block_index}时出错: {e}")
+            # 如果分割失败，返回原始块（可能会导致API错误，但不会丢失内容）
+            return [block]
+
+    def _further_split_blocks(self, blocks: List[Dict]) -> List[Dict]:
+        """进一步分割可能超长的块"""
+        result_blocks = []
+
+        for i, block in enumerate(blocks):
+            try:
+                split_blocks = self._split_overlong_block(block, i)
+                result_blocks.extend(split_blocks)
+            except Exception as e:
+                self.logger.warning(f"处理块{i}时出错: {e}")
+                result_blocks.append(block)
+
+        return result_blocks
 
 
 # 全局Notion客户端实例
