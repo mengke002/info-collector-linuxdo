@@ -3,7 +3,7 @@
 """
 import logging
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from openai import OpenAI
 
 try:
@@ -41,16 +41,35 @@ class LLMClient:
         priority_info = f", Priority Model: {self.priority_model}" if self.priority_model else ""
         self.logger.info(f"LLM客户端初始化成功 - Model: {self.model}{priority_info}, Base URL: {self.base_url}")
 
-    def analyze_content(self, content: str, prompt_template: str, max_retries: int = 3) -> Dict[str, Any]:
-        """使用streaming方式分析内容，支持重试机制"""
+    def analyze_content(
+        self,
+        content: str,
+        prompt_template: str,
+        max_retries: int = 3,
+        model_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """使用streaming方式分析内容，支持重试机制
+
+        Args:
+            content: 需要分析的原始内容
+            prompt_template: 提示词模板
+            max_retries: 最大重试次数
+            model_override: 指定使用的模型，提供时将跳过优先模型回退逻辑
+        """
         # 格式化提示词
         prompt = prompt_template.format(content=content)
 
         models_to_try = []
-        if self.priority_model:
-            models_to_try.append(self.priority_model)
-        if self.model not in models_to_try:
-            models_to_try.append(self.model)
+        use_fallback_chain = model_override is None
+
+        if model_override:
+            models_to_try.append(model_override)
+            self.logger.info(f"使用指定模型执行LLM分析: {model_override}")
+        else:
+            if self.priority_model:
+                models_to_try.append(self.priority_model)
+            if self.model not in models_to_try:
+                models_to_try.append(self.model)
 
         last_response = None
         for model_name in models_to_try:
@@ -60,7 +79,11 @@ class LLMClient:
 
             last_response = result
 
-            if model_name == self.priority_model and self.model != self.priority_model:
+            if (
+                use_fallback_chain
+                and model_name == self.priority_model
+                and self.model != self.priority_model
+            ):
                 self.logger.warning(
                     f"优先模型 {self.priority_model} 在 {max_retries} 次尝试后失败，回退至 {self.model}"
                 )

@@ -136,16 +136,32 @@ def print_result(result: dict, task_type: str):
             # 单个板块报告
             print(f"   板块: {result.get('category')}")
             print(f"   分析主题: {result.get('topics_analyzed', 0)} 个")
-            if result.get('report_id'):
-                print(f"   报告ID: {result.get('report_id')}")
-            
-            # 显示Notion推送结果
-            notion_push = result.get('notion_push')
-            if notion_push:
-                if notion_push.get('success'):
-                    print(f"   📄 Notion推送: 成功 - {notion_push.get('page_url')}")
-                else:
-                    print(f"   📄 Notion推送: 失败 - {notion_push.get('error')}")
+            model_reports = result.get('model_reports', [])
+            if model_reports:
+                print(f"   模型输出:")
+                for mr in model_reports:
+                    display = mr.get('model_display') or mr.get('model') or 'LLM'
+                    if mr.get('success'):
+                        print(f"      - {display}: 报告ID {mr.get('report_id')}")
+                        notion_push = mr.get('notion_push')
+                        if notion_push:
+                            if notion_push.get('success'):
+                                print(f"        📄 Notion: 成功 - {notion_push.get('page_url')}")
+                            else:
+                                print(f"        📄 Notion: 失败 - {notion_push.get('error')}")
+                    else:
+                        error_msg = mr.get('error', '未知错误')
+                        print(f"      - {display}: 失败 - {error_msg}")
+            else:
+                if result.get('report_id'):
+                    print(f"   报告ID: {result.get('report_id')}")
+
+                notion_push = result.get('notion_push')
+                if notion_push:
+                    if notion_push.get('success'):
+                        print(f"   📄 Notion推送: 成功 - {notion_push.get('page_url')}")
+                    else:
+                        print(f"   📄 Notion推送: 失败 - {notion_push.get('error')}")
         else:
             # 所有板块报告
             print(f"   成功板块: {result.get('successful_reports', 0)}/{result.get('total_categories', 0)}")

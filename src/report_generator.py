@@ -30,7 +30,38 @@ class ReportGenerator:
     def get_beijing_time(self) -> datetime:
         """获取当前北京时间"""
         return datetime.now(timezone.utc) + timedelta(hours=8)
-    
+
+    def _get_report_models(self) -> List[str]:
+        """获取用于生成报告的模型列表（优先模型 + 默认模型）"""
+        if not self.llm:
+            return []
+
+        models = []
+        priority_model = getattr(self.llm, 'priority_model', None)
+        base_model = getattr(self.llm, 'model', None)
+
+        if priority_model:
+            models.append(priority_model)
+        if base_model and base_model not in models:
+            models.append(base_model)
+
+        return models
+
+    def _get_model_display_name(self, model_name: str) -> str:
+        """根据模型名称生成用于展示的友好名称"""
+        if not model_name:
+            return 'LLM'
+
+        lower_name = model_name.lower()
+        if 'gemini' in lower_name:
+            return 'Gemini'
+        if 'glm' in lower_name and '4.5' in lower_name:
+            return 'GLM4.5'
+        if 'glm' in lower_name:
+            return 'GLM'
+
+        return model_name
+
     def _truncate_content(self, content: str, max_length: int = None) -> str:
         """截断内容到指定长度"""
         if max_length is None:
@@ -306,97 +337,112 @@ class ReportGenerator:
                     'topics_analyzed': 0
                 }
             
-            self.logger.info(f"共获取到 {len(hot_topics_data)} 个主题的详细数据，开始统一LLM分析")
-            
-            # 使用统一LLM分析
-            unified_result = self._analyze_all_topics_with_llm(hot_topics_data)
-            
-            if not unified_result or not unified_result.get('success'):
-                self.logger.warning(f"{category or '全站'} 板块的统一主题分析失败")
+            self.logger.info(
+                f"共获取到 {len(hot_topics_data)} 个主题的详细数据，准备生成统一分析上下文"
+            )
+
+            formatted_content = self._format_all_topics_for_analysis(hot_topics_data)
+            self.logger.info(
+                f"统一分析上下文构建完成，长度: {len(formatted_content)} 字符"
+            )
+
+            models_to_generate = self._get_report_models()
+            if not models_to_generate:
+                self.logger.warning("未配置任何可用于生成报告的模型")
                 return {
                     'success': False,
-                    'error': f'{category or "全站"} 板块主题分析失败',
-                    'category': category,
+                    'error': '未配置可用的LLM模型',
+                    'category': category or '全站',
                     'topics_analyzed': 0
                 }
-            
-            self.logger.info(f"统一分析完成，分析了 {len(hot_topics_data)} 个主题")
-            
-            # 生成Markdown报告
-            report_content = self._generate_unified_report_markdown(
-                category=category or '全站',
-                unified_analysis=unified_result,
-                hot_topics_data=hot_topics_data,
-                period_start=start_time,
-                period_end=end_time
+
+            model_reports: List[Dict[str, Any]] = []
+            failures: List[Dict[str, Any]] = []
+            tasks = []
+            task_meta: List[Dict[str, str]] = []
+
+            category_label = category or '全站'
+
+            for model_name in models_to_generate:
+                display_name = self._get_model_display_name(model_name)
+                task_meta.append({'model': model_name, 'display': display_name})
+                tasks.append(
+                    self._generate_report_for_model(
+                        model_name=model_name,
+                        display_name=display_name,
+                        category_label=category_label,
+                        hot_topics_data=hot_topics_data,
+                        formatted_content=formatted_content,
+                        start_time=start_time,
+                        end_time=end_time
+                    )
+                )
+
+            self.logger.info(
+                f"开始并行生成 {len(tasks)} 份模型报告: {[meta['display'] for meta in task_meta]}"
             )
-            
-            # 保存报告到数据库
-            report_data = {
-                'category': category or '全站',
-                'report_type': 'hotspot',
-                'analysis_period_start': start_time,
-                'analysis_period_end': end_time,
-                'topics_analyzed': len(hot_topics_data),
-                'report_title': f'[{category or "全站"}] 社区情报洞察报告',
-                'report_content': report_content
-            }
-            
-            report_id = self.db.save_report(report_data)
-            
+
+            task_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for meta, task_result in zip(task_meta, task_results):
+                model_name = meta['model']
+                display_name = meta['display']
+
+                if isinstance(task_result, Exception):
+                    error_msg = str(task_result)
+                    self.logger.warning(
+                        f"模型 {model_name} ({display_name}) 报告生成过程中出现未处理异常: {error_msg}"
+                    )
+                    failures.append({
+                        'model': model_name,
+                        'model_display': display_name,
+                        'error': error_msg
+                    })
+                    continue
+
+                if task_result.get('success'):
+                    model_reports.append(task_result)
+                else:
+                    failure_entry = {
+                        'model': model_name,
+                        'model_display': display_name,
+                        'error': task_result.get('error', '报告生成失败')
+                    }
+                    failures.append(failure_entry)
+
+            overall_success = len(model_reports) > 0
+
             result = {
-                'success': True,
-                'category': category or '全站',
-                'report_id': report_id,
-                'topics_analyzed': len(hot_topics_data),
+                'success': overall_success,
+                'category': category_label,
+                'topics_analyzed': len(hot_topics_data) if overall_success else 0,
                 'total_topics_found': len(hot_topics),
                 'analysis_period': {
                     'start': start_time,
                     'end': end_time,
                     'hours_back': hours_back
                 },
-                'report_preview': report_content[:500] + "..." if len(report_content) > 500 else report_content
+                'model_reports': model_reports,
+                'failures': failures
             }
-            
-            # 尝试推送到Notion
-            try:
-                from .notion_client import notion_client
-                
-                # 格式化Notion标题
-                beijing_time = self.get_beijing_time()
-                time_str = beijing_time.strftime('%H:%M')
-                notion_title = f"[{time_str}] {category or '全站'}热点报告 ({len(hot_topics_data)}个主题)"
-                
-                self.logger.info(f"开始推送报告到Notion: {notion_title}")
-                
-                notion_result = notion_client.create_report_page(
-                    report_title=notion_title,
-                    report_content=report_content,
-                    report_date=beijing_time
-                )
-                
-                if notion_result.get('success'):
-                    self.logger.info(f"报告成功推送到Notion: {notion_result.get('page_url')}")
-                    result['notion_push'] = {
-                        'success': True,
-                        'page_url': notion_result.get('page_url'),
-                        'path': notion_result.get('path')
-                    }
+
+            if overall_success:
+                primary_report = model_reports[0]
+                result['report_id'] = primary_report['report_id']
+                result['report_title'] = primary_report['report_title']
+                result['report_preview'] = primary_report['report_preview']
+                result['notion_push'] = primary_report.get('notion_push')
+                result['report_ids'] = [mr['report_id'] for mr in model_reports]
+            else:
+                if failures:
+                    result['error'] = failures[0]['error']
                 else:
-                    self.logger.warning(f"推送到Notion失败: {notion_result.get('error')}")
-                    result['notion_push'] = {
-                        'success': False,
-                        'error': notion_result.get('error')
-                    }
-                    
-            except Exception as e:
-                self.logger.warning(f"推送到Notion时出错: {e}")
-                result['notion_push'] = {
-                    'success': False,
-                    'error': str(e)
-                }
-            
-            self.logger.info(f"{category or '全站'} 分析完成: 分析了 {len(hot_topics_data)}/{len(hot_topics)} 个主题，报告ID: {report_id}")
+                    result['error'] = '报告生成失败'
+
+            self.logger.info(
+                f"{category_label} 分析完成: 成功生成 {len(model_reports)} 份报告，失败 {len(failures)} 份"
+            )
+
             return result
             
         except Exception as e:
@@ -451,6 +497,152 @@ class ReportGenerator:
                 'reports': []
             }
     
+    async def _generate_report_for_model(
+        self,
+        *,
+        model_name: str,
+        display_name: str,
+        category_label: str,
+        hot_topics_data: List[Dict[str, Any]],
+        formatted_content: str,
+        start_time: datetime,
+        end_time: datetime
+    ) -> Dict[str, Any]:
+        """在独立线程中生成指定模型的报告"""
+        return await asyncio.to_thread(
+            self._generate_report_for_model_sync,
+            model_name,
+            display_name,
+            category_label,
+            hot_topics_data,
+            formatted_content,
+            start_time,
+            end_time
+        )
+
+    def _generate_report_for_model_sync(
+        self,
+        model_name: str,
+        display_name: str,
+        category_label: str,
+        hot_topics_data: List[Dict[str, Any]],
+        formatted_content: str,
+        start_time: datetime,
+        end_time: datetime
+    ) -> Dict[str, Any]:
+        """同步执行指定模型的LLM分析、报告生成和Notion推送"""
+
+        self.logger.info(
+            f"[{display_name}] 模型线程启动，开始统一分析"
+        )
+
+        unified_result = self._analyze_all_topics_with_llm(
+            hot_topics_data,
+            model_override=model_name,
+            formatted_content=formatted_content
+        )
+
+        if not unified_result.get('success'):
+            error_msg = unified_result.get('error', f'{model_name} 分析失败')
+            self.logger.warning(
+                f"{category_label} 板块使用模型 {model_name} 生成分析失败: {error_msg}"
+            )
+            return {
+                'success': False,
+                'model': model_name,
+                'model_display': display_name,
+                'error': error_msg
+            }
+
+        self.logger.info(
+            f"{category_label} 板块模型 {model_name} 统一分析完成，开始生成报告"
+        )
+
+        report_content = self._generate_unified_report_markdown(
+            category=category_label,
+            unified_analysis=unified_result,
+            hot_topics_data=hot_topics_data,
+            period_start=start_time,
+            period_end=end_time
+        )
+
+        report_title = f'[{category_label}] 社区情报洞察报告 - {display_name}'
+
+        report_data = {
+            'category': category_label,
+            'report_type': 'hotspot',
+            'analysis_period_start': start_time,
+            'analysis_period_end': end_time,
+            'topics_analyzed': len(hot_topics_data),
+            'report_title': report_title,
+            'report_content': report_content
+        }
+
+        report_id = self.db.save_report(report_data)
+
+        model_report = {
+            'model': model_name,
+            'model_display': display_name,
+            'success': True,
+            'report_id': report_id,
+            'report_title': report_title,
+            'provider': unified_result.get('provider'),
+            'topics_analyzed': len(hot_topics_data),
+            'report_preview': report_content[:500] + "..." if len(report_content) > 500 else report_content
+        }
+
+        notion_push_info = None
+        try:
+            from .notion_client import notion_client
+
+            beijing_time = self.get_beijing_time()
+            time_str = beijing_time.strftime('%H:%M')
+            notion_title = (
+                f"[{time_str}] [{display_name}] {category_label}热点报告 "
+                f"({len(hot_topics_data)}个主题)"
+            )
+
+            self.logger.info(
+                f"开始推送报告到Notion ({display_name}): {notion_title}"
+            )
+
+            notion_result = notion_client.create_report_page(
+                report_title=notion_title,
+                report_content=report_content,
+                report_date=beijing_time
+            )
+
+            if notion_result.get('success'):
+                self.logger.info(
+                    f"报告成功推送到Notion ({display_name}): {notion_result.get('page_url')}"
+                )
+                notion_push_info = {
+                    'success': True,
+                    'page_url': notion_result.get('page_url'),
+                    'path': notion_result.get('path')
+                }
+            else:
+                error_msg = notion_result.get('error', '未知错误')
+                self.logger.warning(
+                    f"推送到Notion失败 ({display_name}): {error_msg}"
+                )
+                notion_push_info = {
+                    'success': False,
+                    'error': error_msg
+                }
+
+        except Exception as e:
+            self.logger.warning(f"推送到Notion时出错 ({display_name}): {e}")
+            notion_push_info = {
+                'success': False,
+                'error': str(e)
+            }
+
+        if notion_push_info:
+            model_report['notion_push'] = notion_push_info
+
+        return model_report
+
     def _format_all_topics_for_analysis(self, hot_topics_data: List[Dict[str, Any]]) -> str:
         """将所有热门主题合并为一个文档用于LLM统一分析 (V2.1)"""
         content_parts = []
@@ -627,24 +819,40 @@ class ReportGenerator:
 **注意：请不要生成"来源清单"部分，这部分将由程序自动添加。**
 """
     
-    def _analyze_all_topics_with_llm(self, hot_topics_data: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def _analyze_all_topics_with_llm(
+        self,
+        hot_topics_data: List[Dict[str, Any]],
+        model_override: Optional[str] = None,
+        formatted_content: Optional[str] = None
+    ) -> Dict[str, Any]:
         """使用LLM对所有主题进行统一分析"""
         try:
             # 检查LLM客户端是否可用
             if not self.llm:
                 self.logger.warning("LLM客户端未初始化")
-                return None
+                return {
+                    'success': False,
+                    'error': 'LLM客户端未初始化',
+                    'model': model_override
+                }
             
-            # 合并所有主题内容
-            content = self._format_all_topics_for_analysis(hot_topics_data)
+            # 合并所有主题内容（可复用预生成上下文）
+            content = formatted_content if formatted_content is not None else self._format_all_topics_for_analysis(hot_topics_data)
             
             # 获取统一分析提示词模板
             prompt_template = self._get_unified_analysis_prompt_template()
             
-            self.logger.info(f"开始对 {len(hot_topics_data)} 个主题进行统一LLM分析，内容总长度: {len(content)} 字符")
+            target_model = model_override or getattr(self.llm, 'priority_model', None) or self.llm.model
+            self.logger.info(
+                f"开始对 {len(hot_topics_data)} 个主题进行统一LLM分析，指定模型: {target_model}，内容总长度: {len(content)} 字符"
+            )
             
             # 调用LLM分析
-            result = self.llm.analyze_content(content, prompt_template)
+            result = self.llm.analyze_content(
+                content,
+                prompt_template,
+                model_override=model_override
+            )
             
             if result.get('success'):
                 return {
@@ -655,12 +863,22 @@ class ReportGenerator:
                     'model': result.get('model')
                 }
             else:
-                self.logger.warning(f"LLM统一分析失败: {result.get('error')}")
-                return None
+                error_msg = result.get('error', 'LLM统一分析失败')
+                self.logger.warning(f"LLM统一分析失败: {error_msg}")
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'provider': result.get('provider'),
+                    'model': result.get('model', target_model)
+                }
                 
         except Exception as e:
             self.logger.error(f"统一分析主题时出错: {e}")
-            return None
+            return {
+                'success': False,
+                'error': str(e),
+                'model': model_override
+            }
 
 
 # 全局报告生成器实例
