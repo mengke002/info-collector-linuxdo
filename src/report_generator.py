@@ -4,7 +4,8 @@
 """
 import logging
 import asyncio
-from typing import Dict, Any, List, Optional
+import concurrent.futures
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone, timedelta
 
 from .database import db_manager
@@ -313,23 +314,40 @@ class ReportGenerator:
             
             self.logger.info(f"找到 {len(hot_topics)} 个热门主题，开始获取详细数据")
             
-            # 获取所有主题的详细数据
-            hot_topics_data = []
-            for i, topic in enumerate(hot_topics, 1):
-                self.logger.info(f"获取第 {i}/{len(hot_topics)} 个主题详细数据: {topic.get('title', '未知标题')[:50]}...")
-                
-                # 获取主题的详细内容
-                topic_data = self.db.get_topic_posts_for_analysis(
-                    topic['id'], 
-                    limit=self.top_replies_per_topic
-                )
-                
-                if topic_data:
-                    hot_topics_data.append(topic_data)
-                    self.logger.info(f"主题 {i}/{len(hot_topics)} 数据获取成功")
-                else:
-                    self.logger.warning(f"主题 {i}/{len(hot_topics)} 无法获取详细数据")
-            
+            # 并发获取所有主题的详细数据
+            total_topics = len(hot_topics)
+            max_workers = min(8, total_topics) or 1
+            hot_topics_data: List[Optional[Dict[str, Any]]] = [None] * total_topics
+
+            loop = asyncio.get_running_loop()
+            self.logger.info(
+                f"开始并发获取 {total_topics} 个主题详细数据 (max_workers={max_workers})"
+            )
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                fetch_tasks = [
+                    loop.run_in_executor(
+                        executor,
+                        self._fetch_topic_detail_sync,
+                        index,
+                        total_topics,
+                        topic
+                    )
+                    for index, topic in enumerate(hot_topics, 1)
+                ]
+
+                for future in asyncio.as_completed(fetch_tasks):
+                    try:
+                        index, topic_data = await future
+                    except Exception as exc:
+                        self.logger.warning(f"并发获取主题详情时发生异常: {exc}")
+                        continue
+
+                    if topic_data:
+                        hot_topics_data[index - 1] = topic_data
+
+            hot_topics_data = [data for data in hot_topics_data if data]
+
             if not hot_topics_data:
                 self.logger.warning(f"所有主题都无法获取详细数据")
                 return {
@@ -521,6 +539,35 @@ class ReportGenerator:
             start_time,
             end_time
         )
+
+    def _fetch_topic_detail_sync(
+        self,
+        index: int,
+        total: int,
+        topic: Dict[str, Any]
+    ) -> Tuple[int, Optional[Dict[str, Any]]]:
+        """在线程池中获取单个主题的详细数据，返回其索引以便还原顺序"""
+
+        title = topic.get('title', '未知标题')
+        preview = f"{title[:50]}..." if title and len(title) > 50 else title
+        self.logger.info(f"获取第 {index}/{total} 个主题详细数据: {preview}")
+
+        topic_data = None
+        try:
+            topic_data = self.db.get_topic_posts_for_analysis(
+                topic['id'],
+                limit=self.top_replies_per_topic
+            )
+        except Exception as exc:
+            self.logger.warning(f"主题 {index}/{total} 数据获取失败: {exc}")
+            raise
+
+        if topic_data:
+            self.logger.info(f"主题 {index}/{total} 数据获取成功")
+        else:
+            self.logger.warning(f"主题 {index}/{total} 无法获取详细数据")
+
+        return index, topic_data
 
     def _generate_report_for_model_sync(
         self,
