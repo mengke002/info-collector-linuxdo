@@ -174,7 +174,13 @@ class Config:
             # 内容处理配置
             'max_content_length': self._get_config_value('llm', 'max_content_length', 'LLM_MAX_CONTENT_LENGTH', 380000, int)
         }
-    
+
+    def get_report_config(self) -> Dict[str, Any]:
+        """获取报告生成配置，优先级：环境变量 > config.ini > 默认值。"""
+        return {
+            'top_topics_per_category': self._get_config_value('report', 'top_topics_per_category', 'REPORT_TOP_TOPICS', 35, int)
+        }
+
     def get_notion_config(self) -> Dict[str, Any]:
         """获取Notion配置，优先级：环境变量 > config.ini > 默认值。"""
         return {

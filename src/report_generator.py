@@ -21,7 +21,8 @@ class ReportGenerator:
         self.llm = llm_client
         
         # 报告配置
-        self.top_topics_per_category = 30
+        report_config = config.get_report_config()
+        self.top_topics_per_category = report_config.get('top_topics_per_category', 35)
         self.top_replies_per_topic = 10
         # 增加内容长度限制以容纳更多主题
         self.max_content_length = config.get_llm_config().get('max_content_length', 50000)
@@ -572,7 +573,7 @@ class ReportGenerator:
 ### **2. [主题B的标题]**
 *   **详细摘要**: [同上。] [Source: T_m]
 
-...(罗列所有你认为值得报告的热门主题)
+...(罗列所有你认为值得报告的热门主题，不少于15个，力求全面覆盖)
 
 ---
 
