@@ -23,6 +23,10 @@ class LLMClient:
         llm_config = config.get_llm_config()
         self.api_key = llm_config.get('openai_api_key')
         self.model = llm_config.get('openai_model', 'gpt-3.5-turbo')
+        priority_model = llm_config.get('priority_model')
+        if isinstance(priority_model, str):
+            priority_model = priority_model.strip()
+        self.priority_model = priority_model or None
         self.base_url = llm_config.get('openai_base_url', 'https://api.openai.com/v1')
 
         if not self.api_key:
@@ -34,14 +38,34 @@ class LLMClient:
             base_url=self.base_url
         )
 
-        self.logger.info(f"LLM客户端初始化成功 - Model: {self.model}, Base URL: {self.base_url}")
+        priority_info = f", Priority Model: {self.priority_model}" if self.priority_model else ""
+        self.logger.info(f"LLM客户端初始化成功 - Model: {self.model}{priority_info}, Base URL: {self.base_url}")
 
     def analyze_content(self, content: str, prompt_template: str, max_retries: int = 3) -> Dict[str, Any]:
         """使用streaming方式分析内容，支持重试机制"""
         # 格式化提示词
         prompt = prompt_template.format(content=content)
 
-        return self._make_request(prompt, self.model, 0.3, max_retries)
+        models_to_try = []
+        if self.priority_model:
+            models_to_try.append(self.priority_model)
+        if self.model not in models_to_try:
+            models_to_try.append(self.model)
+
+        last_response = None
+        for model_name in models_to_try:
+            result = self._make_request(prompt, model_name, 0.3, max_retries)
+            if result.get('success'):
+                return result
+
+            last_response = result
+
+            if model_name == self.priority_model and self.model != self.priority_model:
+                self.logger.warning(
+                    f"优先模型 {self.priority_model} 在 {max_retries} 次尝试后失败，回退至 {self.model}"
+                )
+
+        return last_response
 
     def _make_request(self, prompt: str, model_name: str, temperature: float, max_retries: int = 3) -> Dict[str, Any]:
         """
@@ -82,30 +106,36 @@ class LLMClient:
                 for chunk in response:
                     chunk_count += 1
 
-                    # 安全检查chunk结构
-                    if not hasattr(chunk, 'choices') or not chunk.choices:
-                        self.logger.debug(f"跳过空chunk {chunk_count}")
+                    try:
+                        # 安全检查chunk结构
+                        choices = getattr(chunk, 'choices', None)
+                        if not choices:
+                            self.logger.debug(f"跳过空chunk {chunk_count}")
+                            continue
+
+                        if len(choices) == 0:
+                            self.logger.debug(f"跳过没有choices的chunk {chunk_count}")
+                            continue
+
+                        delta = choices[0].delta
+
+                        # 安全地获取reasoning_content和content
+                        reasoning_content = getattr(delta, 'reasoning_content', None)
+                        content_chunk = getattr(delta, 'content', None)
+
+                        if reasoning_content:
+                            # 推理内容单独收集，但不加入最终结果
+                            reasoning_content_full += reasoning_content
+                            self.logger.debug(f"Chunk {chunk_count} - Reasoning: {reasoning_content[:50]}...")
+
+                        if content_chunk:
+                            # 只收集最终的content内容
+                            full_content += content_chunk
+                            self.logger.debug(f"Chunk {chunk_count} - Content: {content_chunk[:50]}...")
+                    except Exception as chunk_error:
+                        self.logger.warning(f"Chunk {chunk_count} 处理异常，已跳过: {chunk_error}")
+                        self.logger.debug("异常chunk详情: %r", chunk, exc_info=True)
                         continue
-
-                    if len(chunk.choices) == 0:
-                        self.logger.debug(f"跳过没有choices的chunk {chunk_count}")
-                        continue
-
-                    delta = chunk.choices[0].delta
-
-                    # 安全地获取reasoning_content和content
-                    reasoning_content = getattr(delta, 'reasoning_content', None)
-                    content_chunk = getattr(delta, 'content', None)
-
-                    if reasoning_content:
-                        # 推理内容单独收集，但不加入最终结果
-                        reasoning_content_full += reasoning_content
-                        self.logger.debug(f"Chunk {chunk_count} - Reasoning: {reasoning_content[:50]}...")
-
-                    if content_chunk:
-                        # 只收集最终的content内容
-                        full_content += content_chunk
-                        self.logger.debug(f"Chunk {chunk_count} - Content: {content_chunk[:50]}...")
 
                 self.logger.info(f"LLM调用完成 - 处理了 {chunk_count} 个chunks")
                 self.logger.info(f"响应内容长度: {len(full_content)} 字符")

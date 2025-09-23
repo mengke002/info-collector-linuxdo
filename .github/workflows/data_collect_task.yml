@@ -333,6 +333,7 @@ jobs:
         # --- Optional LLM Configuration ---
         OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
         OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+        PRIORITY_MODEL: ${{ secrets.PRIORITY_MODEL }}
         DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
         DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
         LLM_PREFERRED_PROVIDER: ${{ secrets.LLM_PREFERRED_PROVIDER }}

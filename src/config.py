@@ -168,6 +168,7 @@ class Config:
             # OpenAI Compatible API 配置
             'openai_api_key': self._get_config_value('llm', 'openai_api_key', 'OPENAI_API_KEY', None),
             'openai_model': self._get_config_value('llm', 'openai_model', 'OPENAI_MODEL', 'gpt-3.5-turbo'),
+            'priority_model': self._get_config_value('llm', 'priority_model', 'PRIORITY_MODEL', None),
             'openai_base_url': self._get_config_value('llm', 'openai_base_url', 'OPENAI_BASE_URL', 'https://api.openai.com/v1'),
             
             # 内容处理配置
