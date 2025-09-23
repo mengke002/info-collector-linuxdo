@@ -37,15 +37,17 @@ class ReportGenerator:
             return []
 
         models = []
-        priority_model = getattr(self.llm, 'priority_model', None)
-        base_model = getattr(self.llm, 'model', None)
+        raw_models = getattr(self.llm, 'models', None) or []
 
-        if priority_model:
-            models.append(priority_model)
-        if base_model and base_model not in models:
-            models.append(base_model)
+        for model_name in raw_models:
+            if model_name and model_name not in models:
+                models.append(model_name)
 
-        return models
+        if models:
+            return models
+
+        fallback_model = getattr(self.llm, 'model', None)
+        return [fallback_model] if fallback_model else []
 
     def _get_model_display_name(self, model_name: str) -> str:
         """根据模型名称生成用于展示的友好名称"""
@@ -842,7 +844,9 @@ class ReportGenerator:
             # 获取统一分析提示词模板
             prompt_template = self._get_unified_analysis_prompt_template()
             
-            target_model = model_override or getattr(self.llm, 'priority_model', None) or self.llm.model
+            available_models = getattr(self.llm, 'models', None) or []
+            fallback_model = getattr(self.llm, 'model', None)
+            target_model = model_override or next((m for m in available_models if m), None) or fallback_model
             self.logger.info(
                 f"开始对 {len(hot_topics_data)} 个主题进行统一LLM分析，指定模型: {target_model}，内容总长度: {len(content)} 字符"
             )

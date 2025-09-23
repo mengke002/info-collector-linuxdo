@@ -1,6 +1,6 @@
 import os
 import configparser
-from typing import Dict, Any
+from typing import Dict, Any, List
 from dotenv import load_dotenv
 
 class Config:
@@ -126,6 +126,18 @@ class Config:
         }
         return default_targets
     
+    def _parse_comma_separated_list(self, raw_value: str) -> List[str]:
+        """Parse comma separated model list, keeping order and removing blanks."""
+        if not raw_value:
+            return []
+
+        items: List[str] = []
+        for item in raw_value.split(','):
+            value = item.strip()
+            if value and value not in items:
+                items.append(value)
+        return items
+
     def _parse_targets_string(self, targets_str: str, source_name: str) -> Dict[str, str]:
         """解析目标URL字符串"""
         if not targets_str:
@@ -163,16 +175,36 @@ class Config:
         return targets
     
     def get_llm_config(self) -> Dict[str, Any]:
-        """获取LLM配置，优先级：环境变量 > config.ini > 默认值。"""
+        """获取LLM配置，支持逗号分隔的模型列表。"""
+        api_key = self._get_config_value('llm', 'openai_api_key', 'OPENAI_API_KEY', None)
+        base_url = self._get_config_value('llm', 'openai_base_url', 'OPENAI_BASE_URL', 'https://api.openai.com/v1')
+        max_content_length = self._get_config_value('llm', 'max_content_length', 'LLM_MAX_CONTENT_LENGTH', 380000, int)
+
+        models_raw = self._get_config_value('llm', 'openai_models', 'OPENAI_MODELS', '', str)
+        models = self._parse_comma_separated_list(models_raw)
+
+        # 向后兼容旧配置
+        if not models:
+            legacy_priority = self._get_config_value('llm', 'priority_model', 'PRIORITY_MODEL', None)
+            legacy_primary = self._get_config_value('llm', 'openai_model', 'OPENAI_MODEL', 'gpt-3.5-turbo')
+            if legacy_priority:
+                models.append(legacy_priority)
+            if legacy_primary and legacy_primary not in models:
+                models.append(legacy_primary)
+
+        if not models:
+            models.append('gpt-3.5-turbo')
+
+        primary_model = models[0]
+        secondary_model = models[1] if len(models) > 1 else None
+
         return {
-            # OpenAI Compatible API 配置
-            'openai_api_key': self._get_config_value('llm', 'openai_api_key', 'OPENAI_API_KEY', None),
-            'openai_model': self._get_config_value('llm', 'openai_model', 'OPENAI_MODEL', 'gpt-3.5-turbo'),
-            'priority_model': self._get_config_value('llm', 'priority_model', 'PRIORITY_MODEL', None),
-            'openai_base_url': self._get_config_value('llm', 'openai_base_url', 'OPENAI_BASE_URL', 'https://api.openai.com/v1'),
-            
-            # 内容处理配置
-            'max_content_length': self._get_config_value('llm', 'max_content_length', 'LLM_MAX_CONTENT_LENGTH', 380000, int)
+            'openai_api_key': api_key,
+            'openai_base_url': base_url,
+            'max_content_length': max_content_length,
+            'models': models,
+            'openai_model': primary_model,
+            'priority_model': secondary_model
         }
 
     def get_report_config(self) -> Dict[str, Any]:

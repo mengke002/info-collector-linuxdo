@@ -22,12 +22,17 @@ class LLMClient:
         # 从配置文件获取配置（按优先级：环境变量 > config.ini > 默认值）
         llm_config = config.get_llm_config()
         self.api_key = llm_config.get('openai_api_key')
-        self.model = llm_config.get('openai_model', 'gpt-3.5-turbo')
-        priority_model = llm_config.get('priority_model')
-        if isinstance(priority_model, str):
-            priority_model = priority_model.strip()
-        self.priority_model = priority_model or None
         self.base_url = llm_config.get('openai_base_url', 'https://api.openai.com/v1')
+
+        models = llm_config.get('models') or []
+        self.models = [m for m in models if isinstance(m, str) and m.strip()]
+        if not self.models:
+            fallback_model = llm_config.get('openai_model', 'gpt-3.5-turbo')
+            if fallback_model:
+                self.models = [fallback_model]
+
+        self.model = self.models[0]
+        self.priority_model = self.models[1] if len(self.models) > 1 else None
 
         if not self.api_key:
             raise ValueError("未找到OPENAI_API_KEY配置，请在环境变量或config.ini中设置")
@@ -38,8 +43,10 @@ class LLMClient:
             base_url=self.base_url
         )
 
-        priority_info = f", Priority Model: {self.priority_model}" if self.priority_model else ""
-        self.logger.info(f"LLM客户端初始化成功 - Model: {self.model}{priority_info}, Base URL: {self.base_url}")
+        models_info = ", ".join(self.models) if len(self.models) > 1 else self.model
+        self.logger.info(
+            f"LLM客户端初始化成功 - Models: {models_info}, Base URL: {self.base_url}"
+        )
 
     def analyze_content(
         self,
@@ -59,33 +66,28 @@ class LLMClient:
         # 格式化提示词
         prompt = prompt_template.format(content=content)
 
-        models_to_try = []
         use_fallback_chain = model_override is None
 
         if model_override:
-            models_to_try.append(model_override)
+            models_to_try = [model_override]
             self.logger.info(f"使用指定模型执行LLM分析: {model_override}")
         else:
-            if self.priority_model:
-                models_to_try.append(self.priority_model)
-            if self.model not in models_to_try:
-                models_to_try.append(self.model)
+            models_to_try = []
+            for model_name in self.models:
+                if model_name and model_name not in models_to_try:
+                    models_to_try.append(model_name)
 
         last_response = None
-        for model_name in models_to_try:
+        for index, model_name in enumerate(models_to_try):
             result = self._make_request(prompt, model_name, 0.3, max_retries)
             if result.get('success'):
                 return result
 
             last_response = result
-
-            if (
-                use_fallback_chain
-                and model_name == self.priority_model
-                and self.model != self.priority_model
-            ):
+            if use_fallback_chain and index < len(models_to_try) - 1:
+                fallback_target = models_to_try[index + 1]
                 self.logger.warning(
-                    f"优先模型 {self.priority_model} 在 {max_retries} 次尝试后失败，回退至 {self.model}"
+                    f"模型 {model_name} 在 {max_retries} 次尝试后失败，将回退至 {fallback_target}"
                 )
 
         return last_response
