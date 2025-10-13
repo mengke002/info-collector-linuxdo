@@ -51,18 +51,51 @@ class ReportGenerator:
         return [fallback_model] if fallback_model else []
 
     def _get_model_display_name(self, model_name: str) -> str:
-        """根据模型名称生成用于展示的友好名称"""
+        """根据模型名称生成用于展示的友好名称,保留版本号避免冲突"""
         if not model_name:
             return 'LLM'
 
         lower_name = model_name.lower()
-        if 'gemini' in lower_name:
-            return 'Gemini'
-        if 'glm' in lower_name and '4.5' in lower_name:
-            return 'GLM4.5'
+
+        # GLM 系列 - 保留版本号区分
         if 'glm' in lower_name:
+            if '4.6' in lower_name or '4-6' in lower_name:
+                return 'GLM-4.6'
+            elif '4.5' in lower_name or '4-5' in lower_name:
+                return 'GLM-4.5'
             return 'GLM'
 
+        # Qwen 系列
+        if 'qwen' in lower_name:
+            if 'max' in lower_name:
+                return 'Qwen-Max'
+            elif 'plus' in lower_name:
+                return 'Qwen-Plus'
+            elif 'turbo' in lower_name:
+                return 'Qwen-Turbo'
+            return 'Qwen'
+
+        # Gemini 系列
+        if 'gemini' in lower_name:
+            if 'flash' in lower_name:
+                return 'Gemini-Flash'
+            elif 'pro' in lower_name:
+                return 'Gemini-Pro'
+            return 'Gemini'
+
+        # DeepSeek 系列
+        if 'deepseek' in lower_name:
+            if 'v3' in lower_name:
+                return 'DeepSeek-V3'
+            elif 'v2' in lower_name:
+                return 'DeepSeek-V2'
+            return 'DeepSeek'
+
+        # Kimi 系列
+        if 'kimi' in lower_name or 'moonshot' in lower_name:
+            return 'Kimi'
+
+        # 未识别的模型,返回原始名称
         return model_name
 
     def _truncate_content(self, content: str, max_length: int = None) -> str:
@@ -894,7 +927,7 @@ class ReportGenerator:
 
         report_data = {
             'category': category_label,
-            'report_type': 'hotspot',
+            'report_type': 'deep_insight',
             'analysis_period_start': start_time,
             'analysis_period_end': end_time,
             'topics_analyzed': len(hot_topics_data),
@@ -922,18 +955,19 @@ class ReportGenerator:
             beijing_time = self.get_beijing_time()
             time_str = beijing_time.strftime('%H:%M')
             notion_title = (
-                f"[{time_str}] [{display_name}] {category_label}热点报告 "
+                f"[{time_str}] [{display_name}] {category_label}热点洞察 "
                 f"({len(hot_topics_data)}个主题)"
             )
 
             self.logger.info(
-                f"开始推送报告到Notion ({display_name}): {notion_title}"
+                f"开始推送深度洞察报告到Notion ({display_name}): {notion_title}"
             )
 
-            notion_result = notion_client.create_report_page(
+            notion_result = notion_client.create_report_page_in_hierarchy(
                 report_title=notion_title,
                 report_content=report_content,
-                report_date=beijing_time
+                report_date=beijing_time,
+                report_type='deep'
             )
 
             if notion_result.get('success'):

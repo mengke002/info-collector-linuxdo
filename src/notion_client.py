@@ -938,7 +938,7 @@ class NotionClient:
         return result_blocks
 
     def find_or_create_report_type_folder(self, day_page_id: str, report_type: str) -> Optional[str]:
-        """在日期页面下查找或创建报告类型文件夹（日报资讯/深度报告）
+        """在日期页面下查找或创建报告类型文件夹（日报资讯/洞察报告）
 
         Args:
             day_page_id: 日期页面ID
@@ -949,7 +949,7 @@ class NotionClient:
         """
         try:
             # 确定文件夹名称
-            folder_name = "日报资讯" if report_type == 'light' else "深度报告"
+            folder_name = "日报资讯" if report_type == 'light' else "洞察报告"
 
             # 获取日期页面的子页面
             children_result = self.get_page_children(day_page_id)
@@ -1001,7 +1001,7 @@ class NotionClient:
             month = f"{report_date.month:02d}月"
             day = f"{report_date.day:02d}日"
 
-            folder_name = "日报资讯" if report_type == 'light' else "深度报告"
+            folder_name = "日报资讯" if report_type == 'light' else "洞察报告"
 
             self.logger.info(f"开始创建{folder_name}报告页面: {year}/{month}/{day}/{folder_name} - {report_title}")
 

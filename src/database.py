@@ -244,17 +244,18 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS reports (
                 id MEDIUMINT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT '报告唯一ID',
                 category VARCHAR(50) NOT NULL COMMENT '分析的板块分类',
-                report_type ENUM('hotspot', 'trend', 'summary') DEFAULT 'hotspot' COMMENT '报告类型',
+                report_type ENUM('hotspot', 'trend', 'summary', 'daily_light', 'deep_insight') DEFAULT 'hotspot' COMMENT '报告类型: hotspot=热点报告, trend=趋势报告, summary=总结报告, daily_light=日报资讯, deep_insight=深度洞察',
                 analysis_period_start TIMESTAMP NOT NULL COMMENT '分析数据的起始时间',
                 analysis_period_end TIMESTAMP NOT NULL COMMENT '分析数据的结束时间',
                 topics_analyzed SMALLINT UNSIGNED DEFAULT 0 COMMENT '分析的主题数量',
                 report_title VARCHAR(200) NOT NULL COMMENT '报告标题',
                 report_content MEDIUMTEXT NOT NULL COMMENT '报告内容(Markdown格式)',
                 generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '报告生成时间',
-                
+
                 INDEX idx_category (category),
                 INDEX idx_generated_at (generated_at),
-                INDEX idx_analysis_period (analysis_period_start, analysis_period_end)
+                INDEX idx_analysis_period (analysis_period_start, analysis_period_end),
+                INDEX idx_report_type (report_type)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=COMPRESSED;
             """
         ]

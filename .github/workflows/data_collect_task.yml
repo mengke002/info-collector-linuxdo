@@ -314,7 +314,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements-base.txt
         
-    - name: Run dual-track intelligent analysis report (日报资讯 + 深度洞察)
+    - name: Run dual-track intelligent analysis report
       run: python main.py --task report --output json
       env:
         # --- Required Secrets ---
