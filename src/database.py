@@ -596,20 +596,31 @@ class DatabaseManager:
             cursor.execute(sql, (category, hours_back, hours_back, limit))
             return cursor.fetchall()
     
-    def get_hot_topics_all(self, limit: int = 30, hours_back: int = 24) -> List[Dict[str, Any]]:
-        """获取所有分类在指定时间内的热门主题（不按分类筛选）"""
-        sql = """
-        SELECT id, title, url, category, author_id, reply_count, view_count, 
+    def get_hot_topics_all(self, limit: Optional[int] = 30, hours_back: int = 24) -> List[Dict[str, Any]]:
+        """获取所有分类在指定时间内的热门主题（不按分类筛选）
+
+        Args:
+            limit: 返回数量限制，None表示返回所有结果
+            hours_back: 回溯小时数
+        """
+        # 基础SQL，不包含LIMIT子句
+        base_sql = """
+        SELECT id, title, url, category, author_id, reply_count, view_count,
                total_like_count, hotness_score, created_at, last_activity_at
-        FROM topics 
+        FROM topics
         WHERE created_at >= DATE_SUB(NOW(), INTERVAL %s HOUR)
           AND hotness_score > 0
-        ORDER BY hotness_score DESC 
-        LIMIT %s
+        ORDER BY hotness_score DESC
         """
-        
+
         with self.get_cursor() as (cursor, connection):
-            cursor.execute(sql, (hours_back, limit))
+            if limit is None:
+                # 不限制数量，返回所有结果
+                cursor.execute(base_sql, (hours_back,))
+            else:
+                # 限制返回数量
+                sql = base_sql + " LIMIT %s"
+                cursor.execute(sql, (hours_back, limit))
             return cursor.fetchall()
     
     def get_recent_active_topics(self, hours_back: int = 24) -> List[Dict[str, Any]]:

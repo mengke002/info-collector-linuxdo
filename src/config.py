@@ -179,6 +179,7 @@ class Config:
         api_key = self._get_config_value('llm', 'openai_api_key', 'OPENAI_API_KEY', None)
         base_url = self._get_config_value('llm', 'openai_base_url', 'OPENAI_BASE_URL', 'https://api.openai.com/v1')
         max_content_length = self._get_config_value('llm', 'max_content_length', 'LLM_MAX_CONTENT_LENGTH', 380000, int)
+        max_tokens = self._get_config_value('llm', 'max_tokens', 'LLM_MAX_TOKENS', 20000, int)
 
         models_raw = self._get_config_value('llm', 'openai_models', 'OPENAI_MODELS', '', str)
         models = self._parse_comma_separated_list(models_raw)
@@ -202,6 +203,7 @@ class Config:
             'openai_api_key': api_key,
             'openai_base_url': base_url,
             'max_content_length': max_content_length,
+            'max_tokens': max_tokens,
             'models': models,
             'openai_model': primary_model,
             'priority_model': secondary_model

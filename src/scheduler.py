@@ -194,36 +194,59 @@ class TaskScheduler:
             }
     
     async def run_report_task(self, category: str = None, hours_back: int = 24) -> Dict[str, Any]:
-        """执行智能分析报告任务"""
+        """执行智能分析报告任务（双轨制：日报资讯 + 深度洞察）"""
         if category:
             task_name = f"智能分析报告 - {category}板块"
         else:
-            task_name = "智能分析报告 - 所有板块"
-        
+            task_name = "双轨制智能分析报告 - 全站"
+
         start_time = log_task_start(task_name)
-        
+
         try:
             # 初始化数据库（确保reports表存在）
             self.logger.info("初始化数据库...")
             db_manager.init_database()
+
             if category:
-                # 生成指定分类的报告
+                # 如果指定了分类，只生成该分类的深度报告（保持向后兼容）
+                self.logger.info(f"生成指定分类 {category} 的深度洞察报告...")
                 result = await report_generator.generate_category_report(category, hours_back)
-            else:
-                # 生成所有分类的报告
-                result = await report_generator.generate_all_categories_report(hours_back)
-            
-            if result.get('success'):
-                if category:
-                    log_task_end(task_name, start_time, 
-                                topics_analyzed=result.get('topics_analyzed', 0))
-                else:
+
+                if result.get('success'):
                     log_task_end(task_name, start_time,
-                                total_reports=result.get('successful_reports', 0),
-                                total_topics=result.get('total_topics_analyzed', 0))
-            
+                                topics_analyzed=result.get('topics_analyzed', 0))
+            else:
+                # 没有指定分类时，执行双轨制报告生成
+                self.logger.info("=" * 80)
+                self.logger.info("开始执行双轨制报告生成：日报资讯 + 深度洞察")
+                self.logger.info("=" * 80)
+
+                result = await report_generator.run_dual_report_generation(hours_back)
+
+                if result.get('success'):
+                    light_summary = result.get('summary', {})
+                    light_success = light_summary.get('light_success', False)
+                    deep_success = light_summary.get('deep_success', False)
+                    total_light_topics = light_summary.get('light_topics', 0)
+                    total_deep_topics = light_summary.get('deep_topics', 0)
+                    total_light_reports = light_summary.get('total_light_reports', 0)
+                    total_deep_reports = light_summary.get('total_deep_reports', 0)
+
+                    self.logger.info("=" * 80)
+                    self.logger.info("双轨制报告生成完成:")
+                    self.logger.info(f"  📰 日报资讯: {'✅ 成功' if light_success else '❌ 失败'} "
+                                   f"(分析{total_light_topics}个主题, 生成{total_light_reports}份报告)")
+                    self.logger.info(f"  📈 深度洞察: {'✅ 成功' if deep_success else '❌ 失败'} "
+                                   f"(分析{total_deep_topics}个主题, 生成{total_deep_reports}份报告)")
+                    self.logger.info("=" * 80)
+
+                    log_task_end(task_name, start_time,
+                                total_light_reports=total_light_reports,
+                                total_deep_reports=total_deep_reports,
+                                total_topics=total_light_topics + total_deep_topics)
+
             return result
-            
+
         except Exception as e:
             log_error(task_name, e)
             return {

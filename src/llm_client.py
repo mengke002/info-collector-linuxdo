@@ -23,6 +23,7 @@ class LLMClient:
         llm_config = config.get_llm_config()
         self.api_key = llm_config.get('openai_api_key')
         self.base_url = llm_config.get('openai_base_url', 'https://api.openai.com/v1')
+        self.max_tokens = llm_config.get('max_tokens', 20000)
 
         models = llm_config.get('models') or []
         self.models = [m for m in models if isinstance(m, str) and m.strip()]
@@ -45,7 +46,7 @@ class LLMClient:
 
         models_info = ", ".join(self.models) if len(self.models) > 1 else self.model
         self.logger.info(
-            f"LLM客户端初始化成功 - Models: {models_info}, Base URL: {self.base_url}"
+            f"LLM客户端初始化成功 - Models: {models_info}, Base URL: {self.base_url}, Max Tokens: {self.max_tokens}"
         )
 
     def analyze_content(
@@ -118,6 +119,7 @@ class LLMClient:
                         {'role': 'user', 'content': prompt}
                     ],
                     temperature=temperature,
+                    max_tokens=self.max_tokens,
                     stream=True
                 )
 

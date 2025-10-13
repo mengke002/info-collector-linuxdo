@@ -314,7 +314,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements-base.txt
         
-    - name: Run intelligent analysis report
+    - name: Run dual-track intelligent analysis report (日报资讯 + 深度洞察)
       run: python main.py --task report --output json
       env:
         # --- Required Secrets ---
@@ -339,6 +339,7 @@ jobs:
         LLM_MAX_RETRIES: ${{ secrets.LLM_MAX_RETRIES }}
         LLM_TIMEOUT: ${{ secrets.LLM_TIMEOUT }}
         LLM_MAX_CONTENT_LENGTH: ${{ secrets.LLM_MAX_CONTENT_LENGTH }}
+        LLM_MAX_TOKENS: ${{ secrets.LLM_MAX_TOKENS }}
         REPORT_TOP_TOPICS: ${{ secrets.REPORT_TOP_TOPICS }}
 
         # --- Notion Integration (optional) ---

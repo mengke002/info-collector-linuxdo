@@ -132,8 +132,63 @@ def print_result(result: dict, task_type: str):
     
     elif task_type == 'report':
         print(f"✅ 智能分析报告完成")
-        if 'category' in result:
-            # 单个板块报告
+
+        # 检查是否是双轨制报告
+        if 'light_report' in result and 'deep_report' in result:
+            # 双轨制报告输出
+            print(f"   === 双轨制报告生成结果 ===")
+            summary = result.get('summary', {})
+
+            # 日报资讯部分
+            light_report = result.get('light_report', {})
+            light_success = summary.get('light_success', False)
+            light_topics = summary.get('light_topics', 0)
+            total_light_reports = summary.get('total_light_reports', 0)
+
+            print(f"\n   📰 日报资讯: {'✅ 成功' if light_success else '❌ 失败'}")
+            print(f"      分析主题: {light_topics} 个")
+            print(f"      生成报告: {total_light_reports} 份")
+
+            # 显示每个模型的报告
+            light_model_reports = light_report.get('model_reports', [])
+            if light_model_reports:
+                print(f"      模型报告:")
+                for mr in light_model_reports:
+                    display = mr.get('model_display') or mr.get('model') or 'LLM'
+                    if mr.get('success'):
+                        print(f"         - {display}: 报告ID {mr.get('report_id')}")
+                        notion_push = mr.get('notion_push')
+                        if notion_push and notion_push.get('success'):
+                            print(f"           📄 Notion: 成功 - {notion_push.get('page_url')}")
+
+            # 深度洞察部分
+            deep_report = result.get('deep_report', {})
+            deep_success = summary.get('deep_success', False)
+            deep_topics = summary.get('deep_topics', 0)
+            total_deep_reports = summary.get('total_deep_reports', 0)
+
+            print(f"\n   📈 深度洞察: {'✅ 成功' if deep_success else '❌ 失败'}")
+            print(f"      分析主题: {deep_topics} 个")
+            print(f"      生成报告: {total_deep_reports} 份")
+
+            # 显示每个模型的报告
+            deep_model_reports = deep_report.get('model_reports', [])
+            if deep_model_reports:
+                print(f"      模型报告:")
+                for mr in deep_model_reports:
+                    display = mr.get('model_display') or mr.get('model') or 'LLM'
+                    if mr.get('success'):
+                        print(f"         - {display}: 报告ID {mr.get('report_id')}")
+                        notion_push = mr.get('notion_push')
+                        if notion_push and notion_push.get('success'):
+                            print(f"           📄 Notion: 成功 - {notion_push.get('page_url')}")
+
+            # 总体统计
+            total_reports = total_light_reports + total_deep_reports
+            print(f"\n   📊 总计: {total_reports} 份报告生成成功")
+
+        elif 'category' in result:
+            # 单个板块报告（保持向后兼容）
             print(f"   板块: {result.get('category')}")
             print(f"   分析主题: {result.get('topics_analyzed', 0)} 个")
             model_reports = result.get('model_reports', [])
@@ -163,12 +218,12 @@ def print_result(result: dict, task_type: str):
                     else:
                         print(f"   📄 Notion推送: 失败 - {notion_push.get('error')}")
         else:
-            # 所有板块报告
+            # 旧版格式报告（兼容性）
             print(f"   成功板块: {result.get('successful_reports', 0)}/{result.get('total_categories', 0)}")
             print(f"   总分析主题: {result.get('total_topics_analyzed', 0)} 个")
             if result.get('failures'):
                 print(f"   失败板块: {len(result['failures'])} 个")
-            
+
             # 显示Notion推送统计
             reports = result.get('reports', [])
             notion_success = sum(1 for r in reports if r.get('notion_push', {}).get('success'))

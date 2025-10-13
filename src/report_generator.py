@@ -516,7 +516,282 @@ class ReportGenerator:
                 'error': str(e),
                 'reports': []
             }
-    
+
+    async def generate_light_report(self, hours_back: int = 24) -> Dict[str, Any]:
+        """生成日报资讯报告(全面覆盖所有主题)
+
+        Args:
+            hours_back: 回溯小时数,默认24小时
+
+        Returns:
+            报告生成结果
+        """
+        try:
+            self.logger.info(f"开始生成日报资讯报告 (回溯 {hours_back} 小时)")
+
+            # 设置分析时间范围
+            end_time = self.get_beijing_time()
+            start_time = end_time - timedelta(hours=hours_back)
+
+            # 获取所有主题(不限数量)
+            hot_topics = self.db.get_hot_topics_all(
+                limit=None,  # 获取全部主题
+                hours_back=hours_back
+            )
+
+            if not hot_topics:
+                self.logger.warning(f"过去 {hours_back} 小时内没有主题")
+                return {
+                    'success': True,
+                    'report_type': 'light',
+                    'topics_analyzed': 0,
+                    'message': f'过去 {hours_back} 小时内暂无内容'
+                }
+
+            self.logger.info(f"找到 {len(hot_topics)} 个主题,开始获取详细数据")
+
+            # 并发获取所有主题的详细数据
+            total_topics = len(hot_topics)
+            max_workers = min(8, total_topics) or 1
+            hot_topics_data: List[Optional[Dict[str, Any]]] = [None] * total_topics
+
+            loop = asyncio.get_running_loop()
+            self.logger.info(
+                f"开始并发获取 {total_topics} 个主题详细数据 (max_workers={max_workers})"
+            )
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                fetch_tasks = [
+                    loop.run_in_executor(
+                        executor,
+                        self._fetch_topic_detail_sync,
+                        index,
+                        total_topics,
+                        topic
+                    )
+                    for index, topic in enumerate(hot_topics, 1)
+                ]
+
+                for future in asyncio.as_completed(fetch_tasks):
+                    try:
+                        index, topic_data = await future
+                    except Exception as exc:
+                        self.logger.warning(f"并发获取主题详情时发生异常: {exc}")
+                        continue
+
+                    if topic_data:
+                        hot_topics_data[index - 1] = topic_data
+
+            hot_topics_data = [data for data in hot_topics_data if data]
+
+            if not hot_topics_data:
+                self.logger.warning(f"所有主题都无法获取详细数据")
+                return {
+                    'success': False,
+                    'error': '无法获取主题详细数据',
+                    'report_type': 'light',
+                    'topics_analyzed': 0
+                }
+
+            self.logger.info(
+                f"共获取到 {len(hot_topics_data)} 个主题的详细数据,准备生成日报资讯上下文"
+            )
+
+            formatted_content = self._format_all_topics_for_analysis(hot_topics_data)
+            self.logger.info(
+                f"日报资讯上下文构建完成,长度: {len(formatted_content)} 字符"
+            )
+
+            models_to_generate = self._get_report_models()
+            if not models_to_generate:
+                self.logger.warning("未配置任何可用于生成报告的模型")
+                return {
+                    'success': False,
+                    'error': '未配置可用的LLM模型',
+                    'report_type': 'light',
+                    'topics_analyzed': 0
+                }
+
+            model_reports: List[Dict[str, Any]] = []
+            failures: List[Dict[str, Any]] = []
+            tasks = []
+            task_meta: List[Dict[str, str]] = []
+
+            category_label = '全站'
+
+            for model_name in models_to_generate:
+                display_name = self._get_model_display_name(model_name)
+                task_meta.append({'model': model_name, 'display': display_name})
+                tasks.append(
+                    self._generate_light_report_for_model(
+                        model_name=model_name,
+                        display_name=display_name,
+                        category_label=category_label,
+                        hot_topics_data=hot_topics_data,
+                        formatted_content=formatted_content,
+                        start_time=start_time,
+                        end_time=end_time
+                    )
+                )
+
+            self.logger.info(
+                f"开始并行生成 {len(tasks)} 份日报资讯: {[meta['display'] for meta in task_meta]}"
+            )
+
+            task_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for meta, task_result in zip(task_meta, task_results):
+                model_name = meta['model']
+                display_name = meta['display']
+
+                if isinstance(task_result, Exception):
+                    error_msg = str(task_result)
+                    self.logger.warning(
+                        f"模型 {model_name} ({display_name}) 日报资讯生成过程中出现未处理异常: {error_msg}"
+                    )
+                    failures.append({
+                        'model': model_name,
+                        'model_display': display_name,
+                        'error': error_msg
+                    })
+                    continue
+
+                if task_result.get('success'):
+                    model_reports.append(task_result)
+                else:
+                    failure_entry = {
+                        'model': model_name,
+                        'model_display': display_name,
+                        'error': task_result.get('error', '日报资讯生成失败')
+                    }
+                    failures.append(failure_entry)
+
+            overall_success = len(model_reports) > 0
+
+            result = {
+                'success': overall_success,
+                'report_type': 'light',
+                'topics_analyzed': len(hot_topics_data) if overall_success else 0,
+                'total_topics_found': len(hot_topics),
+                'analysis_period': {
+                    'start': start_time,
+                    'end': end_time,
+                    'hours_back': hours_back
+                },
+                'model_reports': model_reports,
+                'failures': failures
+            }
+
+            if overall_success:
+                primary_report = model_reports[0]
+                result['report_id'] = primary_report['report_id']
+                result['report_title'] = primary_report['report_title']
+                result['report_preview'] = primary_report['report_preview']
+                result['notion_push'] = primary_report.get('notion_push')
+                result['report_ids'] = [mr['report_id'] for mr in model_reports]
+            else:
+                if failures:
+                    result['error'] = failures[0]['error']
+                else:
+                    result['error'] = '日报资讯生成失败'
+
+            self.logger.info(
+                f"日报资讯生成完成: 成功生成 {len(model_reports)} 份报告,失败 {len(failures)} 份"
+            )
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"生成日报资讯时出错: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'report_type': 'light',
+                'topics_analyzed': 0
+            }
+
+    async def generate_deep_report(self, hours_back: int = 24) -> Dict[str, Any]:
+        """生成深度洞察报告(热点主题深度分析)
+
+        这是对现有 generate_category_report 的包装,提供统一的双轨制接口
+
+        Args:
+            hours_back: 回溯小时数,默认24小时
+
+        Returns:
+            报告生成结果
+        """
+        self.logger.info(f"开始生成深度洞察报告 (回溯 {hours_back} 小时)")
+        result = await self.generate_category_report(category=None, hours_back=hours_back)
+
+        # 添加报告类型标识
+        if result.get('success'):
+            result['report_type'] = 'deep'
+
+        return result
+
+    async def run_dual_report_generation(self, hours_back: int = 24) -> Dict[str, Any]:
+        """双轨制报告生成总调度器
+
+        依次生成日报资讯和深度洞察报告
+
+        Args:
+            hours_back: 回溯小时数,默认24小时
+
+        Returns:
+            包含两种报告生成结果的汇总
+        """
+        try:
+            self.logger.info(f"=" * 80)
+            self.logger.info(f"开始双轨制报告生成 (回溯 {hours_back} 小时)")
+            self.logger.info(f"=" * 80)
+
+            # 生成日报资讯
+            self.logger.info(">>> 第1轨: 开始生成日报资讯报告")
+            light_result = await self.generate_light_report(hours_back=hours_back)
+
+            # 生成深度洞察报告
+            self.logger.info(">>> 第2轨: 开始生成深度洞察报告")
+            deep_result = await self.generate_deep_report(hours_back=hours_back)
+
+            # 汇总结果
+            overall_success = light_result.get('success', False) or deep_result.get('success', False)
+
+            result = {
+                'success': overall_success,
+                'generation_time': self.get_beijing_time(),
+                'light_report': light_result,
+                'deep_report': deep_result,
+                'summary': {
+                    'light_success': light_result.get('success', False),
+                    'light_topics': light_result.get('topics_analyzed', 0),
+                    'deep_success': deep_result.get('success', False),
+                    'deep_topics': deep_result.get('topics_analyzed', 0),
+                    'total_light_reports': len(light_result.get('model_reports', [])),
+                    'total_deep_reports': len(deep_result.get('model_reports', []))
+                }
+            }
+
+            self.logger.info(f"=" * 80)
+            self.logger.info(f"双轨制报告生成完成:")
+            self.logger.info(f"  - 日报资讯: {'成功' if light_result.get('success') else '失败'} "
+                           f"(分析{light_result.get('topics_analyzed', 0)}个主题, "
+                           f"生成{len(light_result.get('model_reports', []))}份报告)")
+            self.logger.info(f"  - 深度洞察: {'成功' if deep_result.get('success') else '失败'} "
+                           f"(分析{deep_result.get('topics_analyzed', 0)}个主题, "
+                           f"生成{len(deep_result.get('model_reports', []))}份报告)")
+            self.logger.info(f"=" * 80)
+
+            return result
+
+        except Exception as e:
+            self.logger.error(f"双轨制报告生成时出错: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'generation_time': self.get_beijing_time()
+            }
+
     async def _generate_report_for_model(
         self,
         *,
@@ -757,7 +1032,78 @@ class ReportGenerator:
         # 如果内容过长，这里不再截断，让LLM看到所有主题
         self.logger.info(f"格式化后的主题内容总长度: {len(full_content)} 字符")
         return full_content
-    
+
+    def _get_light_report_prompt_template(self) -> str:
+        """获取日报资讯的提示词模板 (V1.0 - Linuxdo 资讯版)"""
+        return '''# Role: 世界一流的科技资讯编辑，擅长从社区讨论中快速提炼关键信息并分类呈现。
+
+# Context:
+你正在为忙碌的开发者和AI爱好者编写一份每日快讯。读者希望在最短时间内获取过去24小时内 Linuxdo 社区的重要动态。你收到的是经过筛选的、该时间段内发布的全部主题帖子。
+
+# Core Principles:
+1.  **全面覆盖 (Comprehensive Coverage)**: 尽可能涵盖所有有价值的信息点，不遗漏重要动态。
+2.  **分类清晰 (Clear Categorization)**: 按主题分类组织信息，便于快速查找。
+3.  **详略得当 (Appropriate Detail)**: 每条信息都应提供足够上下文，确保读者能理解其核心价值。避免过度压缩，但保持精炼。
+4.  **绝对可追溯 (Absolute Traceability)**: 每条信息必须在句末标注来源 `[Source: T_n]`。
+
+# Input Data Format:
+你将收到一系列帖子，格式为：
+`### [Source: T_id] Post Title`
+`**主贴内容:**`
+`Post Content...`
+`**热门回复:**`
+`1. (点赞: X): Reply content...`
+
+# Your Task:
+生成一份结构化的日报资讯，严格按照以下Markdown格式。请为每条资讯提供详实、清晰的描述。
+
+## 📰 今日要闻
+*本节汇总最重要的5-10条核心动态*
+- **[新闻标题]**: 简要描述，说清楚新闻核心内容 (50-150字)。[Source: T_n]
+
+---
+
+## 🛠️ 技术分享与教程
+*编程技巧、开发经验、实战教程、代码分享*
+- **[技术主题]**: 详细说明分享的核心内容、技术亮点和实用价值 (50-150字)。[Source: T_n]
+
+---
+
+## 🤖 AI 模型与应用
+*AI大模型讨论、AIGC应用、Agent实践、模型训练与微调*
+- **[AI相关主题]**: 阐述讨论的核心、技术实现或应用场景 (50-150字)。[Source: T_m]
+
+---
+
+## 💡 灵感与思考
+*产品想法、行业洞察、有趣的观点和深度思考*
+- **[观点/想法]**: 清晰阐述其核心观点、论据和启发意义 (50-150字)。[Source: T_x]
+
+---
+
+## 📦 资源与工具分享
+*开源项目、实用工具、软件推荐、福利分享*
+- **[资源名称]**: 详细说明其用途、特点和推荐理由 (50-150字)。[Source: T_y]
+
+---
+
+## 💬 问题求助与讨论
+*有代表性的技术问题、解决方案探讨、社区热议话题*
+- **[问题/话题]**: 总结问题背景、社区提供的主要解决方案或讨论焦点 (50-150字)。[Source: T_z]
+
+# Input Data:
+```
+{content}
+```
+
+# Important Notes:
+1.  **信息要全面**：你的输入是全部帖子，请确保不要遗漏任何分类下的有价值内容。
+2.  **分类准确**：将每个主题归入最合适的分类。
+3.  **来源标注**：每条信息末尾必须有 `[Source: T_n]` 标注。
+4.  **内容为王**: 确保每条信息的描述足够清晰、完整，能够独立成文。
+5.  如果某个分类下没有内容，请在最终报告中省略该分类的标题。
+'''
+
     def _get_unified_analysis_prompt_template(self) -> str:
         """获取统一分析的提示词模板（V2.4 - Linuxdo 深度内容版）"""
         return """你是一位熟悉开发者文化和技术生态的资深社区分析师。你的任务是分析以下来自 Linuxdo 社区的、已编号的原始讨论材料，并为广大的开发者和AI爱好者撰写一份信息密度高、内容详尽、可读性强的情报简报。
@@ -930,6 +1276,247 @@ class ReportGenerator:
                 'error': str(e),
                 'model': model_override
             }
+
+    def _generate_light_report_markdown(self, category: str, light_analysis: Dict[str, Any],
+                                       hot_topics_data: List[Dict[str, Any]],
+                                       period_start: datetime, period_end: datetime) -> str:
+        """生成日报资讯的Markdown格式"""
+        # 报告标题
+        title = f"📰 [{category}] 社区日报资讯"
+
+        # 时间信息
+        start_str = period_start.strftime('%Y-%m-%d %H:%M:%S')
+        end_str = period_end.strftime('%Y-%m-%d %H:%M:%S')
+        generate_time = self.get_beijing_time().strftime('%Y-%m-%d %H:%M:%S')
+
+        # 获取AI分析内容
+        analysis_content = light_analysis.get('analysis', '分析内容生成失败。')
+
+        # 构建报告内容
+        report_lines = [
+            f"# {title}",
+            "",
+            f"*报告生成时间: {generate_time}*",
+            "",
+            f"*数据范围: {start_str} - {end_str}*",
+            "",
+            "---",
+            "",
+            analysis_content,  # 插入LLM生成的完整报告
+            "",
+            "---",
+            "",
+            "## 📚 来源清单 (Source List)",
+            ""
+        ]
+
+        # 生成来源清单
+        for i, topic_data in enumerate(hot_topics_data, 1):
+            topic_info = topic_data['topic']
+            clean_title = topic_info['title'].replace('[', '【').replace(']', '】')
+            report_lines.append(
+                f"- **[T{i}]** 📌: [{clean_title}]({topic_info['url']})"
+            )
+
+        report_lines.extend(["", "---", ""])
+
+        # 技术信息
+        if light_analysis.get('provider'):
+            report_lines.append(
+                f"*分析引擎: {light_analysis['provider']} ({light_analysis.get('model', 'unknown')})*"
+            )
+
+        report_lines.extend([
+            "",
+            f"📊 **统计摘要**: 本报告分析了 {len(hot_topics_data)} 个主题",
+            "",
+            "*本报告由AI自动生成，仅供参考*"
+        ])
+
+        # 生成原始报告内容
+        raw_report = "\n".join(report_lines)
+
+        # 增强源链接
+        enhanced_report = self._enhance_source_links(raw_report, hot_topics_data)
+
+        return enhanced_report
+
+    def _generate_light_report_for_model_sync(
+        self,
+        model_name: str,
+        display_name: str,
+        category_label: str,
+        hot_topics_data: List[Dict[str, Any]],
+        formatted_content: str,
+        start_time: datetime,
+        end_time: datetime
+    ) -> Dict[str, Any]:
+        """同步执行指定模型的日报资讯LLM分析、报告生成和Notion推送"""
+
+        self.logger.info(
+            f"[{display_name}] 日报资讯模型线程启动，开始分析"
+        )
+
+        # 使用日报资讯的prompt进行分析
+        try:
+            if not self.llm:
+                return {
+                    'success': False,
+                    'model': model_name,
+                    'model_display': display_name,
+                    'error': 'LLM客户端未初始化'
+                }
+
+            prompt_template = self._get_light_report_prompt_template()
+
+            result = self.llm.analyze_content(
+                formatted_content,
+                prompt_template,
+                model_override=model_name
+            )
+
+            if not result.get('success'):
+                error_msg = result.get('error', f'{model_name} 分析失败')
+                self.logger.warning(
+                    f"{category_label} 日报资讯使用模型 {model_name} 生成分析失败: {error_msg}"
+                )
+                return {
+                    'success': False,
+                    'model': model_name,
+                    'model_display': display_name,
+                    'error': error_msg
+                }
+
+            self.logger.info(
+                f"{category_label} 日报资讯模型 {model_name} 分析完成，开始生成报告"
+            )
+
+            light_analysis = {
+                'success': True,
+                'analysis': result['content'],
+                'provider': result.get('provider'),
+                'model': result.get('model')
+            }
+
+        except Exception as e:
+            self.logger.error(f"日报资讯LLM分析时出错: {e}")
+            return {
+                'success': False,
+                'model': model_name,
+                'model_display': display_name,
+                'error': str(e)
+            }
+
+        # 生成Markdown报告
+        report_content = self._generate_light_report_markdown(
+            category=category_label,
+            light_analysis=light_analysis,
+            hot_topics_data=hot_topics_data,
+            period_start=start_time,
+            period_end=end_time
+        )
+
+        report_title = f'[{category_label}] 社区日报资讯 - {display_name}'
+
+        report_data = {
+            'category': category_label,
+            'report_type': 'daily_light',
+            'analysis_period_start': start_time,
+            'analysis_period_end': end_time,
+            'topics_analyzed': len(hot_topics_data),
+            'report_title': report_title,
+            'report_content': report_content
+        }
+
+        report_id = self.db.save_report(report_data)
+
+        model_report = {
+            'model': model_name,
+            'model_display': display_name,
+            'success': True,
+            'report_id': report_id,
+            'report_title': report_title,
+            'provider': light_analysis.get('provider'),
+            'topics_analyzed': len(hot_topics_data),
+            'report_preview': report_content[:500] + "..." if len(report_content) > 500 else report_content
+        }
+
+        # 推送到Notion (使用层级结构)
+        notion_push_info = None
+        try:
+            from .notion_client import notion_client
+
+            beijing_time = self.get_beijing_time()
+            time_str = beijing_time.strftime('%H:%M')
+            notion_title = (
+                f"[{time_str}] [{display_name}] {category_label}日报资讯 "
+                f"({len(hot_topics_data)}个主题)"
+            )
+
+            self.logger.info(
+                f"开始推送日报资讯到Notion ({display_name}): {notion_title}"
+            )
+
+            notion_result = notion_client.create_report_page_in_hierarchy(
+                report_title=notion_title,
+                report_content=report_content,
+                report_date=beijing_time,
+                report_type='light'
+            )
+
+            if notion_result.get('success'):
+                self.logger.info(
+                    f"日报资讯成功推送到Notion ({display_name}): {notion_result.get('page_url')}"
+                )
+                notion_push_info = {
+                    'success': True,
+                    'page_url': notion_result.get('page_url'),
+                    'path': notion_result.get('path')
+                }
+            else:
+                error_msg = notion_result.get('error', '未知错误')
+                self.logger.warning(
+                    f"推送日报资讯到Notion失败 ({display_name}): {error_msg}"
+                )
+                notion_push_info = {
+                    'success': False,
+                    'error': error_msg
+                }
+
+        except Exception as e:
+            self.logger.warning(f"推送日报资讯到Notion时出错 ({display_name}): {e}")
+            notion_push_info = {
+                'success': False,
+                'error': str(e)
+            }
+
+        if notion_push_info:
+            model_report['notion_push'] = notion_push_info
+
+        return model_report
+
+    async def _generate_light_report_for_model(
+        self,
+        *,
+        model_name: str,
+        display_name: str,
+        category_label: str,
+        hot_topics_data: List[Dict[str, Any]],
+        formatted_content: str,
+        start_time: datetime,
+        end_time: datetime
+    ) -> Dict[str, Any]:
+        """在独立线程中生成指定模型的日报资讯"""
+        return await asyncio.to_thread(
+            self._generate_light_report_for_model_sync,
+            model_name,
+            display_name,
+            category_label,
+            hot_topics_data,
+            formatted_content,
+            start_time,
+            end_time
+        )
 
 
 # 全局报告生成器实例
