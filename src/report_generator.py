@@ -1098,7 +1098,7 @@ class ReportGenerator:
 1.  **全面覆盖 (Comprehensive Coverage)**: 尽可能涵盖所有有价值的信息点，不遗漏重要动态。
 2.  **分类清晰 (Clear Categorization)**: 按主题分类组织信息，便于快速查找。
 3.  **详略得当 (Appropriate Detail)**: 每条信息都应提供足够上下文，确保读者能理解其核心价值。避免过度压缩，但保持精炼。
-4.  **可追溯性 (Absolute Traceability)**: 每条信息必须在句末标注来源 `[Source: T_n]`。
+4.  **可追溯性 (Content Traceability)**: 每条信息必须在句末标注来源 `[Source: T_n]`。
 
 # Input Data Format:
 你将收到一系列帖子，格式为：
