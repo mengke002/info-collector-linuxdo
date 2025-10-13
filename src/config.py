@@ -216,7 +216,7 @@ class Config:
             'top_topics_per_category': self._get_config_value('report', 'top_topics_per_category', 'REPORT_TOP_TOPICS', 45, int),
 
             # 日报资讯配置 - 智能筛选
-            'light_report_topics_limit': self._get_config_value('report', 'light_report_topics_limit', 'LIGHT_REPORT_TOPICS_LIMIT', 100, int),
+            'light_report_topics_limit': self._get_config_value('report', 'light_report_topics_limit', 'LIGHT_REPORT_TOPICS_LIMIT', 120, int),
 
             # 日报资讯价值评分权重（总和应为1.0）
             'light_report_hotness_weight': self._get_config_value('report', 'light_report_hotness_weight', 'LIGHT_REPORT_HOTNESS_WEIGHT', 0.4, float),
