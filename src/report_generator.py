@@ -551,7 +551,7 @@ class ReportGenerator:
             }
 
     async def generate_light_report(self, hours_back: int = 24) -> Dict[str, Any]:
-        """生成日报资讯报告(全面覆盖所有主题)
+        """生成日报资讯报告(智能筛选最有价值的主题)
 
         Args:
             hours_back: 回溯小时数,默认24小时
@@ -566,10 +566,30 @@ class ReportGenerator:
             end_time = self.get_beijing_time()
             start_time = end_time - timedelta(hours=hours_back)
 
-            # 获取所有主题(不限数量)
-            hot_topics = self.db.get_hot_topics_all(
-                limit=None,  # 获取全部主题
-                hours_back=hours_back
+            # 从配置中获取日报资讯的主题数量限制
+            report_config = config.get_report_config()
+            light_report_limit = report_config.get('light_report_topics_limit', 100)
+
+            # 获取配置的权重参数
+            hotness_weight = report_config.get('light_report_hotness_weight', 0.4)
+            engagement_weight = report_config.get('light_report_engagement_weight', 0.3)
+            recency_weight = report_config.get('light_report_recency_weight', 0.2)
+            content_quality_weight = report_config.get('light_report_content_quality_weight', 0.1)
+
+            self.logger.info(
+                f"日报资讯配置: 主题数={light_report_limit}, "
+                f"权重(热度={hotness_weight}, 互动={engagement_weight}, "
+                f"时效={recency_weight}, 质量={content_quality_weight})"
+            )
+
+            # 使用智能筛选获取最有价值的主题
+            hot_topics = self.db.get_valuable_topics_with_smart_filter(
+                limit=light_report_limit,
+                hours_back=hours_back,
+                hotness_weight=hotness_weight,
+                engagement_weight=engagement_weight,
+                recency_weight=recency_weight,
+                content_quality_weight=content_quality_weight
             )
 
             if not hot_topics:
@@ -581,7 +601,7 @@ class ReportGenerator:
                     'message': f'过去 {hours_back} 小时内暂无内容'
                 }
 
-            self.logger.info(f"找到 {len(hot_topics)} 个主题,开始获取详细数据")
+            self.logger.info(f"智能筛选后找到 {len(hot_topics)} 个有价值主题,开始获取详细数据")
 
             # 并发获取所有主题的详细数据
             total_topics = len(hot_topics)

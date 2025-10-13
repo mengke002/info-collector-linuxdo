@@ -623,6 +623,78 @@ class DatabaseManager:
                 sql = base_sql + " LIMIT %s"
                 cursor.execute(sql, (hours_back, limit))
             return cursor.fetchall()
+
+    def get_valuable_topics_with_smart_filter(
+        self,
+        limit: int = 100,
+        hours_back: int = 24,
+        hotness_weight: float = 0.4,
+        engagement_weight: float = 0.3,
+        recency_weight: float = 0.2,
+        content_quality_weight: float = 0.1
+    ) -> List[Dict[str, Any]]:
+        """获取指定时间内最有价值的主题（基于多维度综合评分）
+
+        Args:
+            limit: 返回数量限制
+            hours_back: 回溯小时数
+            hotness_weight: 热度分数权重
+            engagement_weight: 互动价值权重（回复数/浏览数比例）
+            recency_weight: 时效性权重（越新越高）
+            content_quality_weight: 内容质量权重（主贴长度+回复质量）
+
+        Returns:
+            按综合价值分数排序的主题列表
+        """
+        sql = """
+        SELECT
+            t.id,
+            t.title,
+            t.url,
+            t.category,
+            t.author_id,
+            t.reply_count,
+            t.view_count,
+            t.total_like_count,
+            t.hotness_score,
+            t.created_at,
+            t.last_activity_at,
+            -- 计算综合价值分数
+            (
+                -- 1. 热度分数（归一化到0-1，假设最大热度为100000）
+                (LEAST(t.hotness_score, 100000) / 100000) * %s +
+
+                -- 2. 互动价值（回复数/浏览数比例，归一化到0-1）
+                (CASE
+                    WHEN t.view_count > 0 THEN
+                        LEAST(t.reply_count / GREATEST(t.view_count, 1), 1.0)
+                    ELSE 0
+                END) * %s +
+
+                -- 3. 时效性（距离现在越近分数越高，24小时内线性衰减）
+                (1 - LEAST(TIMESTAMPDIFF(HOUR, t.created_at, NOW()) / %s, 1.0)) * %s +
+
+                -- 4. 内容质量（基于总点赞数和回复数的组合，归一化到0-1）
+                (LEAST((t.total_like_count + t.reply_count * 2) / 1000, 1.0)) * %s
+            ) AS value_score
+        FROM topics t
+        WHERE t.created_at >= DATE_SUB(NOW(), INTERVAL %s HOUR)
+          AND t.hotness_score > 0
+        ORDER BY value_score DESC
+        LIMIT %s
+        """
+
+        with self.get_cursor() as (cursor, connection):
+            cursor.execute(sql, (
+                hotness_weight,           # 热度权重
+                engagement_weight,        # 互动价值权重
+                hours_back,               # 时效性计算的小时数
+                recency_weight,           # 时效性权重
+                content_quality_weight,   # 内容质量权重
+                hours_back,               # WHERE条件的小时数
+                limit                     # LIMIT数量
+            ))
+            return cursor.fetchall()
     
     def get_recent_active_topics(self, hours_back: int = 24) -> List[Dict[str, Any]]:
         """获取最近有活动的主题列表"""

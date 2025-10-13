@@ -212,7 +212,17 @@ class Config:
     def get_report_config(self) -> Dict[str, Any]:
         """获取报告生成配置，优先级：环境变量 > config.ini > 默认值。"""
         return {
-            'top_topics_per_category': self._get_config_value('report', 'top_topics_per_category', 'REPORT_TOP_TOPICS', 45, int)
+            # 深度洞察报告配置
+            'top_topics_per_category': self._get_config_value('report', 'top_topics_per_category', 'REPORT_TOP_TOPICS', 45, int),
+
+            # 日报资讯配置 - 智能筛选
+            'light_report_topics_limit': self._get_config_value('report', 'light_report_topics_limit', 'LIGHT_REPORT_TOPICS_LIMIT', 100, int),
+
+            # 日报资讯价值评分权重（总和应为1.0）
+            'light_report_hotness_weight': self._get_config_value('report', 'light_report_hotness_weight', 'LIGHT_REPORT_HOTNESS_WEIGHT', 0.4, float),
+            'light_report_engagement_weight': self._get_config_value('report', 'light_report_engagement_weight', 'LIGHT_REPORT_ENGAGEMENT_WEIGHT', 0.3, float),
+            'light_report_recency_weight': self._get_config_value('report', 'light_report_recency_weight', 'LIGHT_REPORT_RECENCY_WEIGHT', 0.2, float),
+            'light_report_content_quality_weight': self._get_config_value('report', 'light_report_content_quality_weight', 'LIGHT_REPORT_CONTENT_QUALITY_WEIGHT', 0.1, float)
         }
 
     def get_notion_config(self) -> Dict[str, Any]:
