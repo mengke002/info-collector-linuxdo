@@ -140,7 +140,10 @@ class DatabaseManager:
         """获取数据库连接"""
         try:
             # 根据配置决定SSL是否启用
-            ssl_enabled = self.db_config.get('ssl_mode', 'disabled').lower() != 'disabled'
+            ssl_mode = self.db_config.get('ssl_mode', 'disabled')
+            ssl_enabled = ssl_mode.lower() != 'disabled'
+            
+            self.logger.info(f"Connecting to database: Host={self.db_config.get('host')}, Port={self.db_config.get('port')}, SSL Mode={ssl_mode}, SSL Enabled={ssl_enabled}")
 
             # 从配置中安全地获取数据库连接参数
             db_host = self.db_config.get('host')
@@ -159,7 +162,7 @@ class DatabaseManager:
                 password=db_password,
                 database=db_name,
                 charset='utf8mb4',
-                ssl={} if ssl_enabled else None,  # 传递字典启用SSL，None禁用
+                ssl={'check_hostname': True} if ssl_enabled else None,  # 传递非空字典启用SSL
                 autocommit=False
             )
             return connection
