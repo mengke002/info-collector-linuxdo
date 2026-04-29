@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Linux.do论坛自动化数据运维系统
-主执行脚本
 """
 import sys
 import argparse
