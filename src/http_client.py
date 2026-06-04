@@ -25,7 +25,11 @@ class TLSClient:
         """启动会话。"""
         if self.session is None:
             self.logger.info("正在启动 TLS HTTP 客户端...")
-            self.session = AsyncSession(impersonate="chrome120")
+            proxy = self.crawler_config.get('proxy')
+            proxies = {"all": proxy} if proxy else None
+            self.session = AsyncSession(impersonate="chrome120", proxies=proxies)
+            if proxy:
+                self.logger.info(f"已配置代理: {proxy[:15]}...")
 
     async def close(self):
         """关闭会话。"""

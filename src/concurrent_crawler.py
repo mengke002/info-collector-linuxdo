@@ -150,7 +150,14 @@ class ConcurrentCrawler:
                     async with client.get_session() as session:
                         self.logger.debug(f"请求URL: {json_url} (尝试 {attempt + 1}/{max_retries + 1})")
                         timeout = self.crawler_config.get('timeout_seconds', 30)
-                        response = await session.get(json_url, timeout=timeout)
+                        # 添加逼真的请求头
+                        headers = {
+                            "accept": "application/json, text/javascript, */*; q=0.01",
+                            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+                            "x-requested-with": "XMLHttpRequest",
+                            "referer": url
+                        }
+                        response = await session.get(json_url, timeout=timeout, headers=headers)
 
                         if response.status_code == 200:
                             json_data = response.json()
@@ -279,7 +286,13 @@ class ConcurrentCrawler:
                 async with client.get_session() as session:
                     self.logger.debug(f"请求URL: {url} (尝试 {attempt + 1}/{max_retries + 1})")
                     timeout = self.crawler_config.get('timeout_seconds', 30)
-                    response = await session.get(url, timeout=timeout)
+                    headers = {
+                        "accept": "application/json, text/javascript, */*; q=0.01",
+                        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+                        "x-requested-with": "XMLHttpRequest",
+                        "referer": "https://linux.do/"
+                    }
+                    response = await session.get(url, timeout=timeout, headers=headers)
                     if response.status_code == 200:
                         return response.json()
                     self.logger.warning(f"请求失败 (尝试 {attempt + 1}): {url} - 状态码: {response.status_code}")

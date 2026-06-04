@@ -65,6 +65,7 @@ jobs:
         TARGETS: ${{ secrets.TARGETS }}
 
         # --- Optional Secrets (with defaults in code) ---
+        CRAWLER_PROXY: ${{ secrets.CRAWLER_PROXY }}
         CRAWLER_SCAN_PAGES: ${{ secrets.CRAWLER_SCAN_PAGES }}
         CRAWLER_DELAY_SECONDS: ${{ secrets.CRAWLER_DELAY_SECONDS }}
         CRAWLER_MAX_RETRIES: ${{ secrets.CRAWLER_MAX_RETRIES }}
@@ -107,6 +108,7 @@ jobs:
         TARGETS: ${{ secrets.TARGETS }}
 
         # --- Optional Secrets (with defaults in code) ---
+        CRAWLER_PROXY: ${{ secrets.CRAWLER_PROXY }}
         CRAWLER_SCAN_PAGES: ${{ secrets.CRAWLER_SCAN_PAGES }}
         CRAWLER_DELAY_SECONDS: ${{ secrets.CRAWLER_DELAY_SECONDS }}
         CRAWLER_MAX_RETRIES: ${{ secrets.CRAWLER_MAX_RETRIES }}
@@ -149,6 +151,7 @@ jobs:
         TARGETS: ${{ secrets.TARGETS }}
 
         # --- Optional Secrets (with defaults in code) ---
+        CRAWLER_PROXY: ${{ secrets.CRAWLER_PROXY }}
         CRAWLER_SCAN_PAGES: ${{ secrets.CRAWLER_SCAN_PAGES }}
         CRAWLER_DELAY_SECONDS: ${{ secrets.CRAWLER_DELAY_SECONDS }}
         CRAWLER_MAX_RETRIES: ${{ secrets.CRAWLER_MAX_RETRIES }}
@@ -192,6 +195,7 @@ jobs:
         TARGETS: ${{ secrets.TARGETS }}
 
         # --- Optional Secrets (with defaults in code) ---
+        CRAWLER_PROXY: ${{ secrets.CRAWLER_PROXY }}
         CRAWLER_SCAN_PAGES: ${{ secrets.CRAWLER_SCAN_PAGES }}
         CRAWLER_DELAY_SECONDS: ${{ secrets.CRAWLER_DELAY_SECONDS }}
         CRAWLER_MAX_RETRIES: ${{ secrets.CRAWLER_MAX_RETRIES }}
@@ -234,6 +238,7 @@ jobs:
         TARGETS: ${{ secrets.TARGETS }}
 
         # --- Optional Secrets (with defaults in code) ---
+        CRAWLER_PROXY: ${{ secrets.CRAWLER_PROXY }}
         CRAWLER_SCAN_PAGES: ${{ secrets.CRAWLER_SCAN_PAGES }}
         CRAWLER_DELAY_SECONDS: ${{ secrets.CRAWLER_DELAY_SECONDS }}
         CRAWLER_MAX_RETRIES: ${{ secrets.CRAWLER_MAX_RETRIES }}
@@ -280,6 +285,7 @@ jobs:
         DB_SSL_MODE: ${{ secrets.DB_SSL_MODE }}
 
         # --- Optional Secrets (with defaults in code) ---
+        CRAWLER_PROXY: ${{ secrets.CRAWLER_PROXY }}
         CRAWLER_SCAN_PAGES: ${{ secrets.CRAWLER_SCAN_PAGES }}
         CRAWLER_DELAY_SECONDS: ${{ secrets.CRAWLER_DELAY_SECONDS }}
         CRAWLER_MAX_RETRIES: ${{ secrets.CRAWLER_MAX_RETRIES }}
@@ -342,6 +348,7 @@ jobs:
         NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
 
         # --- Optional Secrets (with defaults in code) ---
+        CRAWLER_PROXY: ${{ secrets.CRAWLER_PROXY }}
         CRAWLER_SCAN_PAGES: ${{ secrets.CRAWLER_SCAN_PAGES }}
         CRAWLER_DELAY_SECONDS: ${{ secrets.CRAWLER_DELAY_SECONDS }}
         CRAWLER_MAX_RETRIES: ${{ secrets.CRAWLER_MAX_RETRIES }}
