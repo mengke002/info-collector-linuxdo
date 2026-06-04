@@ -32,7 +32,7 @@ class TaskScheduler:
             try:
                 from .concurrent_crawler import ConcurrentCrawler
             except ImportError as e:
-                error_msg = f"无法导入爬虫模块：{e}。请确保已安装playwright: pip install playwright && playwright install"
+                error_msg = f"无法导入爬虫模块：{e}。请确保已安装 curl_cffi: pip install curl_cffi"
                 self.logger.error(error_msg)
                 return {
                     'success': False,
