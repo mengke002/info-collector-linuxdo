@@ -166,7 +166,8 @@ class ConcurrentCrawler:
                     self.logger.warning(f"请求异常 (尝试 {attempt + 1}): {json_url} - {e}")
 
                 if attempt < max_retries:
-                    retry_delay = (2 ** attempt) + random.uniform(0, 1)
+                    # 增加重试的退避时间，避免连续请求触发反爬虫
+                    retry_delay = (3 ** attempt) + random.uniform(1.0, 3.0)
                     self.logger.info(f"将在 {retry_delay:.2f} 秒后重试...")
                     await asyncio.sleep(retry_delay)
             
@@ -286,7 +287,7 @@ class ConcurrentCrawler:
                 self.logger.warning(f"请求异常 (尝试 {attempt + 1}): {url} - {e}")
 
             if attempt < max_retries:
-                retry_delay = (2 ** attempt) + random.uniform(0, 1)
+                retry_delay = (3 ** attempt) + random.uniform(1.0, 3.0)
                 await asyncio.sleep(retry_delay)
 
         self.logger.error(f"请求JSON最终失败: {url}")
