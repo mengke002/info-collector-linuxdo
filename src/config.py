@@ -83,9 +83,9 @@ class Config:
             'timeout_seconds': self._get_config_value('crawler', 'timeout_seconds', 'CRAWLER_TIMEOUT_SECONDS', 30, int),
 
             # Concurrency settings
-            'max_concurrent_boards': self._get_config_value('crawler', 'max_concurrent_boards', 'CRAWLER_MAX_CONCURRENT_BOARDS', 3, int),
-            'max_concurrent_pages': self._get_config_value('crawler', 'max_concurrent_pages', 'CRAWLER_MAX_CONCURRENT_PAGES', 5, int),
-            'max_concurrent_details': self._get_config_value('crawler', 'max_concurrent_details', 'CRAWLER_MAX_CONCURRENT_DETAILS', 8, int)
+            'max_concurrent_boards': self._get_config_value('crawler', 'max_concurrent_boards', 'CRAWLER_MAX_CONCURRENT_BOARDS', 2, int),
+            'max_concurrent_pages': self._get_config_value('crawler', 'max_concurrent_pages', 'CRAWLER_MAX_CONCURRENT_PAGES', 2, int),
+            'max_concurrent_details': self._get_config_value('crawler', 'max_concurrent_details', 'CRAWLER_MAX_CONCURRENT_DETAILS', 3, int)
         }
 
     def get_data_retention_days(self) -> int:
