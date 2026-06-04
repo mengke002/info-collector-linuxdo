@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 import random
 
 from .config import config
-from .playwright_client import PlaywrightClient
+from .http_client import TLSClient
 from .database import db_manager
 from .html_to_markdown import html_to_markdown
 
@@ -138,8 +138,8 @@ class ConcurrentCrawler:
         
         return topics
     
-    async def _crawl_single_page(self, client: PlaywrightClient, url: str, page_num: int) -> List[Dict[str, Any]]:
-        """使用独立的页面实例爬取单个页面，包含重试逻辑。"""
+    async def _crawl_single_page(self, client: TLSClient, url: str, page_num: int) -> List[Dict[str, Any]]:
+        """爬取单个页面，包含重试逻辑。"""
         async with self.page_semaphore:
             json_url = self._build_json_url(url, page_num)
             self.logger.info(f"准备爬取页面: {json_url}")
@@ -147,20 +147,20 @@ class ConcurrentCrawler:
             max_retries = self.crawler_config.get('max_retries', 3)
             for attempt in range(max_retries + 1):
                 try:
-                    async with client.get_page() as page:
+                    async with client.get_session() as session:
                         self.logger.debug(f"请求URL: {json_url} (尝试 {attempt + 1}/{max_retries + 1})")
-                        response = await page.goto(json_url, wait_until='networkidle')
+                        timeout = self.crawler_config.get('timeout_seconds', 30)
+                        response = await session.get(json_url, timeout=timeout)
 
-                        if response and response.ok:
-                            json_data = await response.json()
+                        if response.status_code == 200:
+                            json_data = response.json()
                             topics = self._extract_topics_from_json(json_data, url)
                             self.logger.info(f"页面 {page_num} 成功提取到 {len(topics)} 个主题")
                             # 成功后随机延迟
                             await asyncio.sleep(random.uniform(0.8, 1.5))
                             return topics
                         else:
-                            status = response.status if response else 'No Response'
-                            self.logger.warning(f"请求失败 (尝试 {attempt + 1}): {json_url} - 状态码: {status}")
+                            self.logger.warning(f"请求失败 (尝试 {attempt + 1}): {json_url} - 状态码: {response.status_code}")
 
                 except Exception as e:
                     self.logger.warning(f"请求异常 (尝试 {attempt + 1}): {json_url} - {e}")
@@ -174,7 +174,7 @@ class ConcurrentCrawler:
             self.logger.error(f"获取JSON数据最终失败: {json_url}")
             return []
     
-    async def _crawl_board_pages(self, client: PlaywrightClient, board_name: str, url: str) -> List[Dict[str, Any]]:
+    async def _crawl_board_pages(self, client: TLSClient, board_name: str, url: str) -> List[Dict[str, Any]]:
         """并发爬取单个板块的所有页面"""
         async with self.board_semaphore:
             self.logger.info(f"开始并发爬取板块: {board_name}")
@@ -205,7 +205,7 @@ class ConcurrentCrawler:
         """并发爬取所有板块的主题列表"""
         self.logger.info("开始并发爬取所有板块主题列表")
         
-        async with PlaywrightClient() as client:
+        async with TLSClient() as client:
             # 创建所有板块的爬取任务
             board_tasks = []
             for board_name, url in self.target_urls.items():
@@ -271,18 +271,18 @@ class ConcurrentCrawler:
         self.logger.info(f"需要详细爬取 {len(topics_to_crawl)} 个主题")
         return topics_to_crawl
     
-    async def _get_json_with_retry(self, client: PlaywrightClient, url: str) -> Optional[Dict[str, Any]]:
+    async def _get_json_with_retry(self, client: TLSClient, url: str) -> Optional[Dict[str, Any]]:
         """封装了重试逻辑的JSON获取方法"""
         max_retries = self.crawler_config.get('max_retries', 3)
         for attempt in range(max_retries + 1):
             try:
-                async with client.get_page() as page:
+                async with client.get_session() as session:
                     self.logger.debug(f"请求URL: {url} (尝试 {attempt + 1}/{max_retries + 1})")
-                    response = await page.goto(url, wait_until='networkidle')
-                    if response and response.ok:
-                        return await response.json()
-                    status = response.status if response else 'No Response'
-                    self.logger.warning(f"请求失败 (尝试 {attempt + 1}): {url} - 状态码: {status}")
+                    timeout = self.crawler_config.get('timeout_seconds', 30)
+                    response = await session.get(url, timeout=timeout)
+                    if response.status_code == 200:
+                        return response.json()
+                    self.logger.warning(f"请求失败 (尝试 {attempt + 1}): {url} - 状态码: {response.status_code}")
             except Exception as e:
                 self.logger.warning(f"请求异常 (尝试 {attempt + 1}): {url} - {e}")
 
@@ -293,7 +293,7 @@ class ConcurrentCrawler:
         self.logger.error(f"请求JSON最终失败: {url}")
         return None
 
-    async def _crawl_single_topic_detail(self, client: PlaywrightClient, topic_url: str) -> bool:
+    async def _crawl_single_topic_detail(self, client: TLSClient, topic_url: str) -> bool:
         """使用独立的页面实例爬取单个主题详情，包含分页和重试。"""
         async with self.detail_semaphore:
             base_json_url = topic_url.replace('/t/', '/t/').rstrip('/') + '.json'
@@ -462,7 +462,7 @@ class ConcurrentCrawler:
         
         return posts
     
-    async def _topic_detail_worker(self, name: str, client: PlaywrightClient, queue: asyncio.Queue, results: list):
+    async def _topic_detail_worker(self, name: str, client: TLSClient, queue: asyncio.Queue, results: list):
         """消费者worker，从队列中获取URL并执行爬取"""
         while True:
             try:
@@ -497,7 +497,7 @@ class ConcurrentCrawler:
         for url in topic_urls:
             queue.put_nowait(url)
 
-        async with PlaywrightClient() as client:
+        async with TLSClient() as client:
             # 创建并启动消费者worker
             num_workers = self.max_concurrent_details
             workers = [
