@@ -68,6 +68,12 @@ class TLSClient:
             proxies = {"all": proxy} if proxy else None
             self.session.proxies = proxies
 
+    def get_current_proxy(self) -> str:
+        """获取当前正在使用的代理字符串"""
+        if self.session and hasattr(self.session, 'proxies') and self.session.proxies:
+            return self.session.proxies.get("all")
+        return None
+
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
         """

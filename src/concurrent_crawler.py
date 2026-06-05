@@ -158,7 +158,12 @@ class ConcurrentCrawler:
                             "x-requested-with": "XMLHttpRequest",
                             "referer": url
                         }
-                        response = await session.get(json_url, timeout=timeout, headers=headers)
+
+                        # 在单次请求级别应用代理，避免并发时互相干扰
+                        current_proxy = await proxy_manager.get_proxy()
+                        proxies_kw = {"all": current_proxy} if current_proxy else None
+
+                        response = await session.get(json_url, timeout=timeout, headers=headers, proxies=proxies_kw)
 
                         if response.status_code == 200:
                             json_data = response.json()
@@ -170,17 +175,15 @@ class ConcurrentCrawler:
                         else:
                             self.logger.warning(f"请求失败 (尝试 {attempt + 1}): {json_url} - 状态码: {response.status_code}")
                             if response.status_code in (429, 403):
-                                new_proxy = await proxy_manager.get_proxy()
-                                if new_proxy:
-                                    self.logger.info("遭遇封锁，覆盖当前代理设置进行重试...")
-                                    client.set_proxy_override(new_proxy)
+                                if current_proxy:
+                                    proxy_manager.remove_proxy(current_proxy)
+                                    self.logger.info("遭遇封锁，踢出当前代理，准备下一次重试...")
 
                 except Exception as e:
                     self.logger.warning(f"请求异常 (尝试 {attempt + 1}): {json_url} - {e}")
-                    new_proxy = await proxy_manager.get_proxy()
-                    if new_proxy:
-                        self.logger.info("请求异常，覆盖当前代理设置进行重试...")
-                        client.set_proxy_override(new_proxy)
+                    if current_proxy:
+                        proxy_manager.remove_proxy(current_proxy)
+                        self.logger.info("请求异常，踢出当前代理，准备下一次重试...")
 
                 if attempt < max_retries:
                     # 增加重试的退避时间，避免连续请求触发反爬虫
@@ -292,6 +295,7 @@ class ConcurrentCrawler:
         """封装了重试逻辑的JSON获取方法"""
         max_retries = self.crawler_config.get('max_retries', 3)
         for attempt in range(max_retries + 1):
+            current_proxy = None
             try:
                 async with client.get_session() as session:
                     self.logger.debug(f"请求URL: {url} (尝试 {attempt + 1}/{max_retries + 1})")
@@ -302,22 +306,24 @@ class ConcurrentCrawler:
                         "x-requested-with": "XMLHttpRequest",
                         "referer": "https://linux.do/"
                     }
-                    response = await session.get(url, timeout=timeout, headers=headers)
+
+                    current_proxy = await proxy_manager.get_proxy()
+                    proxies_kw = {"all": current_proxy} if current_proxy else None
+
+                    response = await session.get(url, timeout=timeout, headers=headers, proxies=proxies_kw)
                     if response.status_code == 200:
                         return response.json()
                     self.logger.warning(f"请求失败 (尝试 {attempt + 1}): {url} - 状态码: {response.status_code}")
 
                     if response.status_code in (429, 403):
-                        new_proxy = await proxy_manager.get_proxy()
-                        if new_proxy:
-                            self.logger.info("遭遇封锁，覆盖当前代理设置进行重试...")
-                            client.set_proxy_override(new_proxy)
+                        if current_proxy:
+                            proxy_manager.remove_proxy(current_proxy)
+                            self.logger.info("遭遇封锁，踢出当前代理，准备下一次重试...")
             except Exception as e:
                 self.logger.warning(f"请求异常 (尝试 {attempt + 1}): {url} - {e}")
-                new_proxy = await proxy_manager.get_proxy()
-                if new_proxy:
-                    self.logger.info("请求异常，覆盖当前代理设置进行重试...")
-                    client.set_proxy_override(new_proxy)
+                if current_proxy:
+                    proxy_manager.remove_proxy(current_proxy)
+                    self.logger.info("请求异常，踢出当前代理，准备下一次重试...")
 
             if attempt < max_retries:
                 retry_delay = (3 ** attempt) + random.uniform(1.0, 3.0)
