@@ -21,15 +21,19 @@ class TLSClient:
         self.crawler_config = config.get_crawler_config()
         self.session = None
 
-    async def start(self):
-        """启动会话。"""
+    async def start(self, proxy: str = None):
+        """启动会话。可以传入动态代理来覆盖默认配置。"""
         if self.session is None:
             self.logger.info("正在启动 TLS HTTP 客户端...")
-            proxy = self.crawler_config.get('proxy')
+
+            # 如果没有传入 proxy 参数，则使用配置中的 proxy
+            if not proxy:
+                proxy = self.crawler_config.get('proxy')
+
             proxies = {"all": proxy} if proxy else None
             self.session = AsyncSession(impersonate="chrome120", proxies=proxies)
             if proxy:
-                self.logger.info(f"已配置代理: {proxy[:15]}...")
+                self.logger.info(f"已配置代理: {proxy}")
 
     async def close(self):
         """关闭会话。"""
@@ -57,6 +61,12 @@ class TLSClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """异步上下文管理器出口。"""
         await self.close()
+
+    def set_proxy_override(self, proxy: str):
+        """覆盖当前底层代理设置而不重启整个客户端（防止并发协程被意外中断）"""
+        if self.session:
+            proxies = {"all": proxy} if proxy else None
+            self.session.proxies = proxies
 
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:

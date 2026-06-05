@@ -11,6 +11,7 @@ import random
 from .config import config
 from .http_client import TLSClient
 from .database import db_manager
+from .proxy_manager import proxy_manager
 from .html_to_markdown import html_to_markdown
 
 
@@ -168,9 +169,18 @@ class ConcurrentCrawler:
                             return topics
                         else:
                             self.logger.warning(f"请求失败 (尝试 {attempt + 1}): {json_url} - 状态码: {response.status_code}")
+                            if response.status_code in (429, 403):
+                                new_proxy = await proxy_manager.get_proxy()
+                                if new_proxy:
+                                    self.logger.info("遭遇封锁，覆盖当前代理设置进行重试...")
+                                    client.set_proxy_override(new_proxy)
 
                 except Exception as e:
                     self.logger.warning(f"请求异常 (尝试 {attempt + 1}): {json_url} - {e}")
+                    new_proxy = await proxy_manager.get_proxy()
+                    if new_proxy:
+                        self.logger.info("请求异常，覆盖当前代理设置进行重试...")
+                        client.set_proxy_override(new_proxy)
 
                 if attempt < max_retries:
                     # 增加重试的退避时间，避免连续请求触发反爬虫
@@ -296,8 +306,18 @@ class ConcurrentCrawler:
                     if response.status_code == 200:
                         return response.json()
                     self.logger.warning(f"请求失败 (尝试 {attempt + 1}): {url} - 状态码: {response.status_code}")
+
+                    if response.status_code in (429, 403):
+                        new_proxy = await proxy_manager.get_proxy()
+                        if new_proxy:
+                            self.logger.info("遭遇封锁，覆盖当前代理设置进行重试...")
+                            client.set_proxy_override(new_proxy)
             except Exception as e:
                 self.logger.warning(f"请求异常 (尝试 {attempt + 1}): {url} - {e}")
+                new_proxy = await proxy_manager.get_proxy()
+                if new_proxy:
+                    self.logger.info("请求异常，覆盖当前代理设置进行重试...")
+                    client.set_proxy_override(new_proxy)
 
             if attempt < max_retries:
                 retry_delay = (3 ** attempt) + random.uniform(1.0, 3.0)
