@@ -108,7 +108,11 @@ class ConcurrentCrawler:
                 full_url = f"https://linux.do/t/{slug}/{topic_id}"
                 
                 tags = topic_data.get('tags', [])
-                tags_str = ','.join(tags) if tags else ''
+                # 兼容 tags 是字符串列表或是字典列表的情况
+                if tags and isinstance(tags[0], dict):
+                    tags_str = ','.join([t.get('name', '') for t in tags if isinstance(t, dict)])
+                else:
+                    tags_str = ','.join([str(t) for t in tags]) if tags else ''
                 
                 category_id = topic_data.get('category_id')
                 category = str(category_id) if category_id else 'Unknown'
