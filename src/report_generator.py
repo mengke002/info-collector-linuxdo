@@ -1008,6 +1008,7 @@ class ReportGenerator:
                     'success': False,
                     'error': error_msg
                 }
+                self.logger.error(f"Notion push failed: {error_msg}")
 
         except Exception as e:
             self.logger.warning(f"推送到Notion时出错 ({display_name}): {e}")
@@ -1015,6 +1016,7 @@ class ReportGenerator:
                 'success': False,
                 'error': str(e)
             }
+            self.logger.error(f"Notion push exception: {str(e)}")
 
         if notion_push_info:
             model_report['notion_push'] = notion_push_info
@@ -1536,6 +1538,7 @@ class ReportGenerator:
                     'success': False,
                     'error': error_msg
                 }
+                self.logger.error(f"Notion push failed: {error_msg}")
 
         except Exception as e:
             self.logger.warning(f"推送日报资讯到Notion时出错 ({display_name}): {e}")
@@ -1543,6 +1546,7 @@ class ReportGenerator:
                 'success': False,
                 'error': str(e)
             }
+            self.logger.error(f"Notion push exception: {str(e)}")
 
         if notion_push_info:
             model_report['notion_push'] = notion_push_info
