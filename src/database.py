@@ -195,7 +195,7 @@ class DatabaseManager:
         create_tables_sql = [
             """
             CREATE TABLE IF NOT EXISTS users (
-                id INT PRIMARY KEY COMMENT '用户在论坛的唯一ID',
+                id BIGINT UNSIGNED PRIMARY KEY COMMENT '用户在论坛的唯一ID',
                 username VARCHAR(50) UNIQUE NOT NULL COMMENT '用户名',
                 avatar_url VARCHAR(200) COMMENT '头像URL',
                 first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '首次采集到该用户的时间'
@@ -203,11 +203,11 @@ class DatabaseManager:
             """,
             """
             CREATE TABLE IF NOT EXISTS topics (
-                id INT PRIMARY KEY COMMENT '帖子在论坛的唯一ID',
+                id BIGINT UNSIGNED PRIMARY KEY COMMENT '帖子在论坛的唯一ID',
                 title VARCHAR(500) NOT NULL COMMENT '帖子标题',
                 url VARCHAR(200) UNIQUE NOT NULL COMMENT '帖子URL',
                 category VARCHAR(50) COMMENT '分类名称',
-                author_id INT COMMENT '作者用户ID',
+                author_id BIGINT UNSIGNED COMMENT '作者用户ID',
                 reply_count SMALLINT UNSIGNED DEFAULT 0 COMMENT '回复数',
                 view_count INT UNSIGNED DEFAULT 0 COMMENT '浏览数',
                 created_at TIMESTAMP NOT NULL COMMENT '帖子创建时间',
@@ -226,9 +226,9 @@ class DatabaseManager:
             """,
             """
             CREATE TABLE IF NOT EXISTS posts (
-                id INT PRIMARY KEY COMMENT '回复在论坛的唯一ID',
-                topic_id INT NOT NULL COMMENT '所属帖子的ID',
-                user_id INT COMMENT '回复用户的ID',
+                id BIGINT UNSIGNED PRIMARY KEY COMMENT '回复在论坛的唯一ID',
+                topic_id BIGINT UNSIGNED NOT NULL COMMENT '所属帖子的ID',
+                user_id BIGINT UNSIGNED COMMENT '回复用户的ID',
                 post_number SMALLINT UNSIGNED NOT NULL COMMENT '楼层号',
                 reply_to_post_number SMALLINT UNSIGNED COMMENT '回复目标的楼层号，主楼则为NULL',
                 content_raw TEXT COMMENT '原始文本内容（Markdown等），最大64KB',
@@ -245,7 +245,7 @@ class DatabaseManager:
             """,
             """
             CREATE TABLE IF NOT EXISTS reports (
-                id MEDIUMINT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT '报告唯一ID',
+                id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY COMMENT '报告唯一ID',
                 category VARCHAR(50) NOT NULL COMMENT '分析的板块分类',
                 report_type ENUM('hotspot', 'trend', 'summary', 'daily_light', 'deep_insight') DEFAULT 'hotspot' COMMENT '报告类型: hotspot=热点报告, trend=趋势报告, summary=总结报告, daily_light=日报资讯, deep_insight=深度洞察',
                 analysis_period_start TIMESTAMP NOT NULL COMMENT '分析数据的起始时间',
@@ -269,6 +269,34 @@ class DatabaseManager:
             
             # 升级现有表结构：为topics表添加热度相关字段
             try:
+                # 升级主键为 BIGINT
+                cursor.execute("SHOW COLUMNS FROM users WHERE Field = 'id'")
+                result = cursor.fetchone()
+                if result and 'int' in result['Type'].lower() and 'bigint' not in result['Type'].lower():
+                    try:
+                        cursor.execute("SET FOREIGN_KEY_CHECKS=0")
+
+                        # 确保所有的关联列一起升级类型
+                        cursor.execute("ALTER TABLE users MODIFY COLUMN id BIGINT UNSIGNED COMMENT '用户在论坛的唯一ID'")
+                        cursor.execute("ALTER TABLE topics MODIFY COLUMN id BIGINT UNSIGNED COMMENT '帖子在论坛的唯一ID'")
+                        cursor.execute("ALTER TABLE topics MODIFY COLUMN author_id BIGINT UNSIGNED COMMENT '作者用户ID'")
+                        cursor.execute("ALTER TABLE posts MODIFY COLUMN id BIGINT UNSIGNED COMMENT '回复在论坛的唯一ID'")
+                        cursor.execute("ALTER TABLE posts MODIFY COLUMN topic_id BIGINT UNSIGNED NOT NULL COMMENT '所属帖子的ID'")
+                        cursor.execute("ALTER TABLE posts MODIFY COLUMN user_id BIGINT UNSIGNED COMMENT '回复用户的ID'")
+
+                        cursor.execute("SET FOREIGN_KEY_CHECKS=1")
+                        self.logger.info("已将 users, topics, posts 表的 ID 和外键字段升级为 BIGINT UNSIGNED")
+                    except Exception as e:
+                        cursor.execute("SET FOREIGN_KEY_CHECKS=1")
+                        self.logger.error(f"升级 BIGINT 类型时出错: {e}")
+
+                # 升级 reports.id
+                cursor.execute("SHOW COLUMNS FROM reports WHERE Field = 'id'")
+                result = cursor.fetchone()
+                if result and 'mediumint' in result['Type'].lower():
+                    cursor.execute("ALTER TABLE reports MODIFY COLUMN id INT UNSIGNED AUTO_INCREMENT COMMENT '报告唯一ID'")
+                    self.logger.info("已将 reports 表的 id 字段从 MEDIUMINT 升级为 INT UNSIGNED")
+
                 cursor.execute("SHOW COLUMNS FROM topics LIKE 'total_like_count'")
                 if cursor.rowcount == 0:
                     cursor.execute("ALTER TABLE topics ADD COLUMN total_like_count INT UNSIGNED DEFAULT 0 COMMENT '主题下所有回复的总点赞数'")

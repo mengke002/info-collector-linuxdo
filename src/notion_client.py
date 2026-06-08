@@ -24,9 +24,9 @@ class NotionClient:
         self.parent_page_id = notion_config.get('parent_page_id')
         
         if not self.integration_token:
-            self.logger.warning("Notion集成token未配置")
+            self.logger.error("Notion集成token未配置")
         if not self.parent_page_id:
-            self.logger.warning("Notion父页面ID未配置")
+            self.logger.error("Notion父页面ID未配置")
     
     def _get_headers(self) -> Dict[str, str]:
         """获取API请求头"""
