@@ -5,6 +5,7 @@
 import logging
 import asyncio
 import concurrent.futures
+import re
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone, timedelta
 
@@ -51,52 +52,61 @@ class ReportGenerator:
         return [fallback_model] if fallback_model else []
 
     def _get_model_display_name(self, model_name: str) -> str:
-        """根据模型名称生成用于展示的友好名称,保留版本号避免冲突"""
+        """根据模型名称生成用于展示的友好名称（保留MoE激活参数、版本及日期）"""
         if not model_name:
             return 'LLM'
 
-        lower_name = model_name.lower()
+        name = model_name.strip()
 
-        # GLM 系列 - 保留版本号区分
-        if 'glm' in lower_name:
-            if '4.6' in lower_name or '4-6' in lower_name:
-                return 'GLM-4.6'
-            elif '4.5' in lower_name or '4-5' in lower_name:
-                return 'GLM-4.5'
-            return 'GLM'
+        # 1. 仅剥离厂商/组织前缀 (如 "deepseek-ai/"、"nvidia/" -> 保留右侧)
+        if '/' in name:
+            name = name.split('/')[-1]
 
-        # Qwen 系列
-        if 'qwen' in lower_name:
-            if 'max' in lower_name:
-                return 'Qwen-Max'
-            elif 'plus' in lower_name:
-                return 'Qwen-Plus'
-            elif 'turbo' in lower_name:
-                return 'Qwen-Turbo'
-            return 'Qwen'
+        # 2. 仅剥离平台服务Tag (如 ":free"、":beta"、":nitro" -> 保留左侧)
+        if ':' in name:
+            name = name.split(':')[0]
 
-        # Gemini 系列
-        if 'gemini' in lower_name:
-            if 'flash' in lower_name:
-                return 'Gemini-Flash'
-            elif 'pro' in lower_name:
-                return 'Gemini-Pro'
-            return 'Gemini'
+        # 3. 规范化参数量与MoE标记 (如 550b -> 550B, a55b -> A55B, 8x7b -> 8x7B)
+        # 使用前后非字母数字界定，兼顾连字符、下划线及点号分割
+        name = re.sub(r'(?i)(?<![a-zA-Z0-9])a(\d+(\.\d+)?)b(?![a-zA-Z0-9])', r'A\1B', name)  # MoE 激活参数: a55b -> A55B
+        name = re.sub(r'(?i)(?<![a-zA-Z0-9])(\d+)x(\d+(\.\d+)?)b(?![a-zA-Z0-9])', r'\1x\2B', name)  # 多专家: 8x7b -> 8x7B
+        name = re.sub(r'(?i)(?<![a-zA-Z0-9])(\d+(\.\d+)?)b(?![a-zA-Z0-9])', r'\1B', name)    # 总参数量: 550b -> 550B, 70b -> 70B
 
-        # DeepSeek 系列
-        if 'deepseek' in lower_name:
-            if 'v3' in lower_name:
-                return 'DeepSeek-V3'
-            elif 'v2' in lower_name:
-                return 'DeepSeek-V2'
-            return 'DeepSeek'
+        # 4. 规范化常见品牌与规格词的大小写（使用前后非字母边界，兼顾数字直接连写如 qwen3.8、gpt4o）
+        token_mappings = {
+            r'(?i)(?<![a-zA-Z])deepseek(?![a-zA-Z])': 'DeepSeek',
+            r'(?i)(?<![a-zA-Z])qwen(?![a-zA-Z])': 'Qwen',
+            r'(?i)(?<![a-zA-Z])nemotron(?![a-zA-Z])': 'Nemotron',
+            r'(?i)(?<![a-zA-Z])gemini(?![a-zA-Z])': 'Gemini',
+            r'(?i)(?<![a-zA-Z])claude(?![a-zA-Z])': 'Claude',
+            r'(?i)(?<![a-zA-Z])glm(?![a-zA-Z])': 'GLM',
+            r'(?i)(?<![a-zA-Z])gpt(?![a-zA-Z])': 'GPT',
+            r'(?i)(?<![a-zA-Z])flash(?![a-zA-Z])': 'Flash',
+            r'(?i)(?<![a-zA-Z])pro(?![a-zA-Z])': 'Pro',
+            r'(?i)(?<![a-zA-Z])ultra(?![a-zA-Z])': 'Ultra',
+            r'(?i)(?<![a-zA-Z])chat(?![a-zA-Z])': 'Chat',
+            r'(?i)(?<![a-zA-Z])reasoner(?![a-zA-Z])': 'Reasoner',
+            r'(?i)(?<![a-zA-Z])next(?![a-zA-Z])': 'Next',
+            r'(?i)(?<![a-zA-Z0-9])v(\d+(?:\.\d+)*)(?![a-zA-Z0-9])': r'V\1',  # 版本号: v4.1 -> V4.1
+            r'(?i)(?<![a-zA-Z])llama(?![a-zA-Z])': 'Llama',
+            r'(?i)(?<![a-zA-Z])mistral(?![a-zA-Z])': 'Mistral',
+            r'(?i)(?<![a-zA-Z])mixtral(?![a-zA-Z])': 'Mixtral',
+            r'(?i)(?<![a-zA-Z])moonshot(?![a-zA-Z])': 'Moonshot',
+            r'(?i)(?<![a-zA-Z])kimi(?![a-zA-Z])': 'Kimi',
+            r'(?i)(?<![a-zA-Z])instruct(?![a-zA-Z])': 'Instruct',
+            r'(?i)(?<![a-zA-Z])turbo(?![a-zA-Z])': 'Turbo',
+            r'(?i)(?<![a-zA-Z])sonnet(?![a-zA-Z])': 'Sonnet',
+            r'(?i)(?<![a-zA-Z])haiku(?![a-zA-Z])': 'Haiku',
+            r'(?i)(?<![a-zA-Z])opus(?![a-zA-Z])': 'Opus',
+            r'(?i)(?<![a-zA-Z])plus(?![a-zA-Z])': 'Plus',
+            r'(?i)(?<![a-zA-Z])max(?![a-zA-Z])': 'Max',
+            r'(?i)(?<![a-zA-Z])mini(?![a-zA-Z])': 'Mini',
+        }
 
-        # Kimi 系列
-        if 'kimi' in lower_name or 'moonshot' in lower_name:
-            return 'Kimi'
+        for pattern, repl in token_mappings.items():
+            name = re.sub(pattern, repl, name)
 
-        # 未识别的模型,返回原始名称
-        return model_name
+        return name or model_name
 
     def _truncate_content(self, content: str, max_length: int = None) -> str:
         """截断内容到指定长度"""
