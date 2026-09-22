@@ -209,7 +209,7 @@ class ProxyManager:
         # 1. 如果池中有经过验证的有效代理，直接随机返回
         if self.proxies_pool:
             proxy = random.choice(self.proxies_pool)
-            self.logger.info(f"分配经验证的在线列表代理: {proxy}")
+            self.logger.debug(f"分配经验证的在线列表代理: {proxy}")
             return proxy
 
         # 2. 如果代理池为空，加锁排队刷新
@@ -217,7 +217,7 @@ class ProxyManager:
             # 双重检查锁：等待锁期间，可能前面的协程已经完成了测试并填充了池子
             if self.proxies_pool:
                 proxy = random.choice(self.proxies_pool)
-                self.logger.info(f"分配经验证的在线列表代理: {proxy}")
+                self.logger.debug(f"分配经验证的在线列表代理: {proxy}")
                 return proxy
 
             self.logger.info("在线代理池为空，开始两阶段极速流式测试获取可用代理...")
@@ -235,7 +235,7 @@ class ProxyManager:
 
             if self.proxies_pool:
                 proxy = random.choice(self.proxies_pool)
-                self.logger.info(f"分配经验证的在线列表代理: {proxy}")
+                self.logger.debug(f"分配经验证的在线列表代理: {proxy}")
                 return proxy
 
         # 3. 只有当候选列表全部测试完毕且确实无一存活时，才尝试 FreeProxy 兜底
@@ -248,7 +248,7 @@ class ProxyManager:
                 raw_proxy = await asyncio.to_thread(fetch_free_proxy)
                 if raw_proxy:
                     proxy = raw_proxy if "://" in raw_proxy else f"http://{raw_proxy}"
-                    self.logger.info(f"FreeProxy 分配代理: {proxy}")
+                    self.logger.debug(f"FreeProxy 分配代理: {proxy}")
                     return proxy
             except Exception as e:
                 self.logger.error(f"FreeProxy 获取代理失败: {e}")
