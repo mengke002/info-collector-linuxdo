@@ -324,19 +324,22 @@ class DatabaseManager:
         sanitized_data = self._sanitize_topic_data(topic_data)
         
         with self.get_cursor() as (cursor, connection):
-            # 如果有作者信息，先插入用户
-            if sanitized_data.get('author_id') and sanitized_data.get('author_username'):
-                user_data = self._sanitize_user_data({
-                    'id': sanitized_data['author_id'],
-                    'username': sanitized_data['author_username'],
-                    'avatar_url': None,
-                    'first_seen_at': self.get_beijing_time()
-                })
-                user_sql = """
-                INSERT IGNORE INTO users (id, username, avatar_url, first_seen_at)
-                VALUES (%(id)s, %(username)s, %(avatar_url)s, %(first_seen_at)s)
-                """
-                cursor.execute(user_sql, user_data)
+            # 确保作者在 users 表中存在，防止外键约束失败
+            if sanitized_data.get('author_id'):
+                author_id = sanitized_data['author_id']
+                cursor.execute("SELECT id FROM users WHERE id = %s", (author_id,))
+                if not cursor.fetchone():
+                    try:
+                        author_username = sanitized_data.get('author_username') or f"user_{author_id}"
+                        cursor.execute(
+                            "INSERT IGNORE INTO users (id, username, avatar_url, first_seen_at) VALUES (%s, %s, %s, %s)",
+                            (author_id, author_username, None, self.get_beijing_time())
+                        )
+                        cursor.execute("SELECT id FROM users WHERE id = %s", (author_id,))
+                        if not cursor.fetchone():
+                            sanitized_data['author_id'] = None
+                    except Exception:
+                        sanitized_data['author_id'] = None
             
             # 插入或更新主题，使用北京时间作为抓取时间
             topic_sql = """
@@ -427,6 +430,40 @@ class DatabaseManager:
         """
         
         with self.get_cursor() as (cursor, connection):
+            # 确保所有 user_id 存在于 users 表中，防止外键约束报错 (1452)
+            user_ids = {p['user_id'] for p in sanitized_posts if p.get('user_id') is not None}
+            if user_ids:
+                user_id_list = list(user_ids)
+                placeholders = ','.join(['%s'] * len(user_id_list))
+                cursor.execute(f"SELECT id FROM users WHERE id IN ({placeholders})", user_id_list)
+                existing_user_ids = {row['id'] for row in cursor.fetchall()}
+                missing_user_ids = user_ids - existing_user_ids
+                
+                if missing_user_ids:
+                    self.logger.warning(f"发现 {len(missing_user_ids)} 个回复所属用户不在 users 表中，自动创建占位用户或置空以避免外键冲突")
+                    beijing_time = self.get_beijing_time()
+                    placeholder_users = [
+                        {'id': uid, 'username': f"user_{uid}", 'avatar_url': None, 'first_seen_at': beijing_time}
+                        for uid in missing_user_ids
+                    ]
+                    try:
+                        cursor.executemany(
+                            "INSERT IGNORE INTO users (id, username, avatar_url, first_seen_at) VALUES (%(id)s, %(username)s, %(avatar_url)s, %(first_seen_at)s)",
+                            placeholder_users
+                        )
+                        cursor.execute(f"SELECT id FROM users WHERE id IN ({placeholders})", user_id_list)
+                        now_existing = {row['id'] for row in cursor.fetchall()}
+                        still_missing = user_ids - now_existing
+                        if still_missing:
+                            for p in sanitized_posts:
+                                if p.get('user_id') in still_missing:
+                                    p['user_id'] = None
+                    except Exception as e:
+                        self.logger.warning(f"批量插入占位用户失败，将缺失的 user_id 置为 None: {e}")
+                        for p in sanitized_posts:
+                            if p.get('user_id') in missing_user_ids:
+                                p['user_id'] = None
+
             cursor.executemany(sql, sanitized_posts)
             connection.commit()
             self.logger.info(f"批量插入 {len(sanitized_posts)} 个回复")
@@ -491,6 +528,38 @@ class DatabaseManager:
         """
         
         with self.get_cursor() as (cursor, connection):
+            # 确保所有 author_id 存在于 users 表中，防止外键约束报错 (1452)
+            author_ids = {t['author_id'] for t in sanitized_topics if t.get('author_id') is not None}
+            if author_ids:
+                author_id_list = list(author_ids)
+                placeholders = ','.join(['%s'] * len(author_id_list))
+                cursor.execute(f"SELECT id FROM users WHERE id IN ({placeholders})", author_id_list)
+                existing_author_ids = {row['id'] for row in cursor.fetchall()}
+                missing_author_ids = author_ids - existing_author_ids
+                if missing_author_ids:
+                    self.logger.warning(f"发现 {len(missing_author_ids)} 个主题作者不在 users 表中，自动创建占位作者或置空以避免外键冲突")
+                    placeholder_users = [
+                        {'id': aid, 'username': f"user_{aid}", 'avatar_url': None, 'first_seen_at': beijing_time}
+                        for aid in missing_author_ids
+                    ]
+                    try:
+                        cursor.executemany(
+                            "INSERT IGNORE INTO users (id, username, avatar_url, first_seen_at) VALUES (%(id)s, %(username)s, %(avatar_url)s, %(first_seen_at)s)",
+                            placeholder_users
+                        )
+                        cursor.execute(f"SELECT id FROM users WHERE id IN ({placeholders})", author_id_list)
+                        now_existing = {row['id'] for row in cursor.fetchall()}
+                        still_missing = author_ids - now_existing
+                        if still_missing:
+                            for t in sanitized_topics:
+                                if t.get('author_id') in still_missing:
+                                    t['author_id'] = None
+                    except Exception as e:
+                        self.logger.warning(f"批量插入占位作者失败，将缺失的 author_id 置为 None: {e}")
+                        for t in sanitized_topics:
+                            if t.get('author_id') in missing_author_ids:
+                                t['author_id'] = None
+
             cursor.executemany(sql, sanitized_topics)
             connection.commit()
             self.logger.info(f"批量插入/更新 {len(sanitized_topics)} 个主题")

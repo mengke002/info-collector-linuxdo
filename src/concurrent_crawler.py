@@ -378,11 +378,31 @@ class ConcurrentCrawler:
                         await asyncio.sleep(random.uniform(0.5, 1.0))
 
                 # 数据处理与入库
-                if all_users:
-                    unique_users = {user['id']: user for user in all_users if user.get('id')}
+                unique_users = {user['id']: user for user in all_users if user.get('id')} if all_users else {}
+
+                # 确保所有 posts 的 user_id 都在 unique_users 中
+                for post in all_posts:
+                    uid = post.get('user_id')
+                    if uid and uid not in unique_users:
+                        unique_users[uid] = {
+                            'id': uid,
+                            'username': f"user_{uid}",
+                            'avatar_url': None
+                        }
+
+                topic_info = self._extract_topic_info_from_json(json_data)
+                if topic_info and topic_info.get('author_id'):
+                    aid = topic_info['author_id']
+                    if aid not in unique_users:
+                        unique_users[aid] = {
+                            'id': aid,
+                            'username': topic_info.get('author_username') or f"user_{aid}",
+                            'avatar_url': None
+                        }
+
+                if unique_users:
                     db_manager.batch_insert_users(list(unique_users.values()))
                 
-                topic_info = self._extract_topic_info_from_json(json_data)
                 if topic_info:
                     db_manager.insert_or_update_topic(topic_info)
                 
@@ -399,49 +419,65 @@ class ConcurrentCrawler:
     
     def _extract_users_from_json(self, json_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """从JSON数据中提取用户信息"""
-        users = []
         unique_users = {}
         
         if 'details' in json_data and 'participants' in json_data['details']:
             for user_data in json_data['details']['participants']:
-                user_info = {
-                    'id': user_data.get('id'),
-                    'username': user_data.get('username'),
-                    'avatar_url': user_data.get('avatar_template', '').replace('{size}', '120') if user_data.get('avatar_template') else None
-                }
-                if user_info['id'] and user_info['username']:
-                    unique_users[user_info['id']] = user_info
+                uid = user_data.get('id')
+                if uid:
+                    username = user_data.get('username') or f"user_{uid}"
+                    avatar_template = user_data.get('avatar_template', '')
+                    avatar_url = avatar_template.replace('{size}', '120') if avatar_template else None
+                    unique_users[uid] = {
+                        'id': uid,
+                        'username': username,
+                        'avatar_url': avatar_url
+                    }
         
         if 'post_stream' in json_data and 'posts' in json_data['post_stream']:
             for post in json_data['post_stream']['posts']:
-                if 'user_id' in post and 'username' in post:
-                    user_info = {
-                        'id': post['user_id'],
-                        'username': post['username'],
-                        'avatar_url': post.get('avatar_template', '').replace('{size}', '120') if post.get('avatar_template') else None
-                    }
-                    unique_users[user_info['id']] = user_info
+                uid = post.get('user_id')
+                if uid:
+                    username = post.get('username') or f"user_{uid}"
+                    avatar_template = post.get('avatar_template', '')
+                    avatar_url = avatar_template.replace('{size}', '120') if avatar_template else None
+                    if uid not in unique_users or (unique_users[uid]['username'].startswith("user_") and post.get('username')):
+                        unique_users[uid] = {
+                            'id': uid,
+                            'username': username,
+                            'avatar_url': avatar_url
+                        }
         
         return list(unique_users.values())
     
-    def _extract_topic_info_from_json(self, json_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _extract_topic_info_from_json(self, json_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """从JSON数据中提取主题信息"""
         try:
             beijing_timezone = timezone(timedelta(hours=8))
             created_at_utc = self._parse_datetime(json_data.get('created_at', ''))
             last_activity_at_utc = self._parse_datetime(json_data.get('last_posted_at', ''))
 
+            tags = json_data.get('tags', [])
+            if tags and isinstance(tags[0], dict):
+                tags_str = ','.join([t.get('name', '') for t in tags if isinstance(t, dict) and t.get('name')])
+            else:
+                tags_str = ','.join([str(t) for t in tags if t]) if tags else ''
+
+            now_beijing = datetime.now(timezone.utc).astimezone(beijing_timezone).replace(tzinfo=None)
+            created_at = created_at_utc.astimezone(beijing_timezone).replace(tzinfo=None) if created_at_utc else now_beijing
+            last_activity_at = last_activity_at_utc.astimezone(beijing_timezone).replace(tzinfo=None) if last_activity_at_utc else created_at
+
             topic_data = {
                 'id': json_data.get('id'),
-                'title': json_data.get('title'),
+                'title': json_data.get('title', ''),
                 'url': f"https://linux.do/t/{json_data.get('slug', '')}/{json_data.get('id')}",
-                'category': json_data.get('category_id'),
+                'category': str(json_data.get('category_id', 'Unknown')),
                 'author_id': None,
                 'reply_count': json_data.get('reply_count', 0),
                 'view_count': json_data.get('views', 0),
-                'created_at': created_at_utc.astimezone(beijing_timezone).replace(tzinfo=None),
-                'last_activity_at': last_activity_at_utc.astimezone(beijing_timezone).replace(tzinfo=None),
-                'tags': ','.join(json_data.get('tags', []))
+                'created_at': created_at,
+                'last_activity_at': last_activity_at,
+                'tags': tags_str
             }
             
             if ('post_stream' in json_data and 
@@ -449,11 +485,13 @@ class ConcurrentCrawler:
                 len(json_data['post_stream']['posts']) > 0):
                 first_post = json_data['post_stream']['posts'][0]
                 topic_data['author_id'] = first_post.get('user_id')
+                if first_post.get('username'):
+                    topic_data['author_username'] = first_post.get('username')
             
             return topic_data
             
         except Exception as e:
-            self.logger.error(f"解析主题信息失败: {e}")
+            self.logger.error(f"解析主题信息失败: {e}", exc_info=True)
             return None
     
     def _extract_posts_from_json(self, json_data: Dict[str, Any], topic_id: int) -> List[Dict[str, Any]]:
